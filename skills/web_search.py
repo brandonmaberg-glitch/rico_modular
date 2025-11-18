@@ -1,3 +1,7 @@
+"""Live web search skill backed entirely by OpenAI's web search."""
+
+from __future__ import annotations
+
 """Live web search skill backed by OpenAI tool-calling."""
 
 from __future__ import annotations
@@ -12,6 +16,7 @@ from openai import OpenAI
 
 logger = logging.getLogger("RICO")
 
+_client: Optional[OpenAI] = None
 _api_key = os.getenv("OPENAI_API_KEY")
 _client: Optional[OpenAI] = OpenAI(api_key=_api_key) if _api_key else None
 
@@ -39,6 +44,60 @@ _STYLE_PROMPT = (
 )
 
 
+def _format_messages(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    formatted: List[Dict[str, Any]] = []
+    for message in messages:
+        content = message.get("content")
+        if not content:
+            continue
+        formatted.append(
+            {
+                "role": message["role"],
+                "content": [{"type": "input_text", "text": str(content)}],
+            }
+        )
+    return formatted
+
+
+def _extract_text(response: Any) -> str:
+    chunks: List[str] = []
+    for item in getattr(response, "output", []) or []:
+        if getattr(item, "type", None) != "message":
+            continue
+        for part in getattr(item, "content", []) or []:
+            if getattr(part, "type", None) == "output_text":
+                text = getattr(part, "text", "")
+                if text:
+                    chunks.append(text)
+    return "\n".join(chunks).strip()
+
+
+def _get_client() -> Optional[OpenAI]:
+    """Return a cached OpenAI client if credentials are available."""
+
+    global _client  # pylint: disable=global-statement
+
+    if _client is not None:
+        return _client
+
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        return None
+
+    _client = OpenAI(api_key=api_key)
+    return _client
+
+
+def _call_model(messages: List[Dict[str, Any]]):
+    client = _get_client()
+    if not client:
+        raise RuntimeError("OPENAI_API_KEY is not configured.")
+
+    return client.responses.create(
+        model="gpt-4.1-mini",
+        input=_format_messages(messages),
+        tools=[{"type": "web_search"}],
+        tool_choice="auto",
 def _collect_search_results(query: str, limit: int = 6) -> str:
     """Fetch and format DuckDuckGo search snippets for the tool result."""
     with DDGS() as ddgs:
@@ -67,6 +126,8 @@ def _call_model(messages: List[Dict[str, Any]]):
 
 
 def run_web_search(query: str) -> str:
+    """Use OpenAI's native web search to answer live queries."""
+    if not _get_client():
     """Use OpenAI tool-calling plus DuckDuckGo to answer live web queries."""
     if not _client:
         return "My apologies Sir, but the web search apparatus lacks its credentials."
@@ -83,6 +144,13 @@ def run_web_search(query: str) -> str:
     ]
 
     try:
+        response = _call_model(base_messages)
+        final_message = _extract_text(response)
+
+        if not final_message:
+            raise ValueError("OpenAI returned no content for web search.")
+
+        return final_message
         first_completion = _call_model(base_messages)
         choice = first_completion.choices[0].message
 
