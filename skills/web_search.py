@@ -1,31 +1,38 @@
-"""Web search skill using DuckDuckGo."""
-from __future__ import annotations
+from openai import OpenAI
+import logging
+import os
 
-from typing import List
-
-try:
-    from duckduckgo_search import DDGS  # type: ignore
-except Exception:  # pragma: no cover
-    DDGS = None  # type: ignore
+logger = logging.getLogger("RICO")
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 
-def activate(query: str, *, safe_search: bool = True) -> str:
-    """Search the web for the given query."""
-    if not DDGS:
-        return "Apologies Sir, web search is temporarily unavailable."
+def run_web_search(query: str) -> str:
+    """
+    Uses OpenAI's built-in web search tool to retrieve real-time information.
+    """
+    try:
+        logger.info(f"Running web search for: {query}")
 
-    results: List[str] = []
-    with DDGS() as ddgs:
-        for result in ddgs.text(query, safesearch="on" if safe_search else "off", max_results=3):
-            title = result.get("title", "result")
-            href = result.get("href", "")
-            snippet = result.get("body", "")
-            results.append(f"{title}: {snippet} ({href})")
+        completion = client.chat.completions.create(
+            model="gpt-5.1",
+            messages=[
+                {
+                    "role": "user",
+                    "content": f"Using the web search tool, answer this question with current information: {query}"
+                }
+            ],
+            tools=[
+                {"type": "web_search"}
+            ]
+        )
 
-    if not results:
-        return "Sir, no relevant articles were located."
+        answer = completion.choices[0].message.content
+        logger.info(f"Web search result: {answer}")
+        return answer
 
-    return "Sir, here is what the web yielded:\n- " + "\n- ".join(results)
+    except Exception as e:
+        logger.error(f"Web search failed: {e}")
+        return f"Sorry Sir, I was unable to search the web. {e}"
 
 
-__all__ = ["activate"]
+__all__ = ["run_web_search"]

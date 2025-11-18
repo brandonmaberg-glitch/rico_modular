@@ -16,9 +16,7 @@ def build_skill_registry(config: AppConfig):
         "system_status": system_status.activate,
         "conversation": conversation.activate,
         "car_info": car_info.activate,
-        "web_search": lambda query: web_search.activate(
-            query, safe_search=config.ddg_safe_search
-        ),
+        "web_search": web_search.run_web_search,
     }
 
 
