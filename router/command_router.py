@@ -17,6 +17,11 @@ class CommandRouter:
             return self.skills["system_status"](text)
         if any(keyword in lowered for keyword in ["search", "google", "web"]):
             return self.skills["web_search"](text)
+        if any(
+            pattern in lowered
+            for pattern in ["who is", "what is", "what happened", "why did", "lookup", "google", "search"]
+        ):
+            return self.skills["web_search"](text)
         if any(keyword in lowered for keyword in ["car", "vehicle", "ecu"]):
             return self.skills["car_info"](text)
         return self.skills["conversation"](text)
