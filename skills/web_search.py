@@ -1,38 +1,109 @@
-from openai import OpenAI
+"""Live web search skill backed entirely by OpenAI's web search."""
+
+from __future__ import annotations
+
 import logging
 import os
+from typing import Any, Dict, List, Optional
+
+from openai import OpenAI
 
 logger = logging.getLogger("RICO")
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+_client: Optional[OpenAI] = None
+
+_STYLE_PROMPT = (
+    "You are RICO, a precise and unflappable British butler. Cite newsworthiness,"
+    " keep conclusions cautious, and stick to verified web findings."
+)
+
+
+def _format_messages(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    formatted: List[Dict[str, Any]] = []
+    for message in messages:
+        content = message.get("content")
+        if not content:
+            continue
+        formatted.append(
+            {
+                "role": message["role"],
+                "content": [{"type": "input_text", "text": str(content)}],
+            }
+        )
+    return formatted
+
+
+def _extract_text(response: Any) -> str:
+    chunks: List[str] = []
+    for item in getattr(response, "output", []) or []:
+        if getattr(item, "type", None) != "message":
+            continue
+        for part in getattr(item, "content", []) or []:
+            if getattr(part, "type", None) == "output_text":
+                text = getattr(part, "text", "")
+                if text:
+                    chunks.append(text)
+    return "\n".join(chunks).strip()
+
+
+def _get_client() -> Optional[OpenAI]:
+    """Return a cached OpenAI client if credentials are available."""
+
+    global _client  # pylint: disable=global-statement
+
+    if _client is not None:
+        return _client
+
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        return None
+
+    _client = OpenAI(api_key=api_key)
+    return _client
+
+
+def _call_model(messages: List[Dict[str, Any]]):
+    client = _get_client()
+    if not client:
+        raise RuntimeError("OPENAI_API_KEY is not configured.")
+
+    return client.responses.create(
+        model="gpt-4.1-mini",
+        input=_format_messages(messages),
+        tools=[{"type": "web_search"}],
+        tool_choice="auto",
+        temperature=0.4,
+    )
 
 
 def run_web_search(query: str) -> str:
-    """
-    Uses OpenAI's built-in web search tool to retrieve real-time information.
-    """
+    """Use OpenAI's native web search to answer live queries."""
+    if not _get_client():
+        return "My apologies Sir, but the web search apparatus lacks its credentials."
+
+    base_messages: List[Dict[str, Any]] = [
+        {"role": "system", "content": _STYLE_PROMPT},
+        {
+            "role": "user",
+            "content": (
+                "Search the live web and deliver a brief butler-style reply to this request: "
+                f"{query}"
+            ),
+        },
+    ]
+
     try:
-        logger.info(f"Running web search for: {query}")
+        response = _call_model(base_messages)
+        final_message = _extract_text(response)
 
-        completion = client.chat.completions.create(
-            model="gpt-5.1",
-            messages=[
-                {
-                    "role": "user",
-                    "content": f"Using the web search tool, answer this question with current information: {query}"
-                }
-            ],
-            tools=[
-                {"type": "web_search"}
-            ]
-        )
+        if not final_message:
+            raise ValueError("OpenAI returned no content for web search.")
 
-        answer = completion.choices[0].message.content
-        logger.info(f"Web search result: {answer}")
-        return answer
+        return final_message
 
-    except Exception as e:
-        logger.error(f"Web search failed: {e}")
-        return f"Sorry Sir, I was unable to search the web. {e}"
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.error("Web search failed: %s", exc)
+        return "Sorry Sir, I could not retrieve the requested web intelligence."
 
 
 __all__ = ["run_web_search"]
