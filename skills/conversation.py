@@ -33,7 +33,7 @@ def activate(text: str) -> str:
 
     try:
         completion = _client.chat.completions.create(
-            model="gpt-5.1-mini",
+            model="gpt-4.1-mini",
             messages=[
                 {
                     "role": "system",
@@ -50,7 +50,7 @@ def activate(text: str) -> str:
             raise ValueError("No content returned from OpenAI response.")
         return choice.strip()
     except Exception as exc:  # pragma: no cover - defensive
-        logger.error("Conversation skill failed: %%s", exc)
+        logger.error("Conversation skill failed: %s", exc)
         return "My apologies Sir, my thoughts are momentarily elsewhere."
 
 
