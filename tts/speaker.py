@@ -133,7 +133,7 @@ class Speaker:
         try:
             with self._openai_client.audio.speech.with_streaming_response.create(
                 model="gpt-4o-mini-tts",
-                voice="onyx",
+                voice="alloy",
                 input=text,
                 response_format="wav",
             ) as response:
@@ -150,22 +150,13 @@ class Speaker:
             return None
 
         try:
-            audio = generate(
+            return generate(
                 text=text,
                 voice=self.voice_id,
                 model="eleven_monolingual_v1",
                 voice_settings=VoiceSettings(stability=0.4, similarity_boost=0.75),
                 output_format="wav",
             )
-
-            if isinstance(audio, bytes):
-                return audio
-
-            if hasattr(audio, "__iter__"):
-                return b"".join(chunk for chunk in audio if chunk)
-
-            logger.error("Unexpected ElevenLabs audio payload type: %s", type(audio))
-            return None
         except Exception as exc:  # pragma: no cover - defensive around external call
             logger.error("ElevenLabs generation failed: %s", exc)
             return None

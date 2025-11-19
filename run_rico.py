@@ -107,17 +107,18 @@ def _run_conversation_loop(
             tts_engine.speak("I am terribly sorry Sir, I did not catch that.")
             continue
 
-        if text.lower() == "voice":
-            if tts_engine.provider == "elevenlabs":
-                if tts_engine.switch_to_openai():
-                    tts_engine.speak("Reverting to the OpenAI voice, Sir.")
-                else:
-                    tts_engine.speak("OpenAI voice is unavailable, Sir.")
+        if text == "Voice":
+            if tts_engine.switch_to_elevenlabs():
+                tts_engine.speak("Switching to your ElevenLabs voice, Sir.")
             else:
-                if tts_engine.switch_to_elevenlabs():
-                    tts_engine.speak("Switching to your ElevenLabs voice, Sir.")
-                else:
-                    tts_engine.speak("ElevenLabs voice is unavailable, Sir.")
+                tts_engine.speak("ElevenLabs voice is unavailable, Sir.")
+            continue
+
+        if text == "voice":
+            if tts_engine.switch_to_openai():
+                tts_engine.speak("Reverting to the OpenAI voice, Sir.")
+            else:
+                tts_engine.speak("OpenAI voice is unavailable, Sir.")
             continue
 
         if _should_exit(text):
