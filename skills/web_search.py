@@ -34,64 +34,68 @@ def _get_client() -> Optional[OpenAI]:
 
 
 def _extract_text(message: Any) -> str:
-    if not message or not getattr(message, "content", None):
+    if not message:
         return ""
+
     parts = []
-    for item in message.content:
-        if item.get("type") == "text" and item.get("text"):
-            parts.append(item["text"])
+    output = getattr(message, "output", None) or []
+    for entry in output:
+        content = entry.get("content", []) if isinstance(entry, dict) else getattr(entry, "content", [])
+        if not content:
+            continue
+        for block in content:
+            if isinstance(block, dict):
+                text = block.get("text") or block.get("output_text")
+                if text:
+                    parts.append(text)
+            elif getattr(block, "text", None):
+                parts.append(block.text)
+
+    if not parts:
+        for fallback_attr in ("output_text", "output_string"):
+            fallback_text = getattr(message, fallback_attr, None)
+            if fallback_text:
+                parts.append(fallback_text)
+                break
+
     return "\n".join(parts).strip()
 
 
 def _run_search(client: OpenAI, query: str) -> str:
     """Execute the web search tool and collapse to 1-3 sentences."""
 
-    system = f"{_SYSTEM_PROMPT}\npersona:{_PERSONA_ID}"
-    search_instruction = (
-        "Fetch current information via the web_search function. Answer as a British"
-        " butler in no more than 3 short sentences. Keep it crisp and avoid fluff."
-    )
-    chat = client.chat.completions.create(
-        model="gpt-4.1-mini",
-        messages=[
-            {"role": "system", "content": system},
-            {"role": "system", "content": _PERSONA_TEXT},
-            {"role": "user", "content": f"{search_instruction}\nQuery: {query}"},
-        ],
-        tools=[{"type": "web_search"}],
-        tool_choice="auto",
-        temperature=0,
+    instruction = (
+        f"{_SYSTEM_PROMPT}\npersona:{_PERSONA_ID}\n{_PERSONA_TEXT}\n"
+        "As a courteous British butler, search the web for the user's request and"
+        " reply in 1 to 3 concise sentences, no more than 350 characters."
     )
 
-    message = chat.choices[0].message if chat.choices else None
-    if not message:
-        return "Sir, I regret the search yielded nothing useful."
+    response = client.responses.create(
+        model="gpt-4.1",
+        input=f"{instruction}\nQuery: {query}",
+        web_search={"bing_query": [{"q": query}], "n_tokens": 2048},
+    )
 
-    # If the model returns tool calls, let it finish the call and summarise.
-    if getattr(message, "tool_calls", None):
-        follow_up = client.chat.completions.create(
-            model="gpt-4.1-mini",
-            messages=[
-                {"role": "system", "content": system},
-                {"role": "system", "content": _PERSONA_TEXT},
-                {"role": "assistant", "tool_calls": message.tool_calls},
-            ],
-            tools=[{"type": "web_search"}],
-            tool_choice="none",
-            temperature=0,
-        )
-        message = follow_up.choices[0].message if follow_up.choices else message
-
-    text = _extract_text(message)
+    text = _extract_text(response)
     if not text:
         return "Sir, the web was oddly silent."
 
     short = text.replace("\n", " ").strip()
-    sentences = short.split(". ")
-    limited = ". ".join(sentences[:3]).strip()
-    if not limited.endswith(('.', '!', '?')):
+    sentences = [part.strip() for part in short.split(". ") if part.strip()]
+    limited_sentences = sentences[:3]
+
+    while len(". ".join(limited_sentences)) > 350 and len(limited_sentences) > 1:
+        limited_sentences.pop()
+
+    limited = ". ".join(limited_sentences).strip()
+    if not limited:
+        return "Sir, the web was oddly silent."
+    if limited and not limited.endswith(('.', '!', '?')):
         limited += "."
-    return limited[:400].strip()
+
+    if len(limited) > 350:
+        limited = limited[:350].rstrip()
+    return limited
 
 
 def run_web_search(query: str) -> str:
