@@ -8,7 +8,7 @@ from logs.logger import setup_logger
 from router.command_router import CommandRouter
 from skills import car_info, conversation, system_status, web_search
 from stt.base import SpeechToTextEngine, TranscriptionResult
-from tts.elevenlabs_tts import ElevenLabsTTS
+from tts.speaker import Speaker
 from wakeword.engine import WakeWordEngine
 
 
@@ -34,7 +34,7 @@ def main() -> None:
 
     wake_engine = WakeWordEngine()
     stt_engine = SpeechToTextEngine(config.openai_api_key)
-    tts_engine = ElevenLabsTTS(config.elevenlabs_api_key, config.elevenlabs_voice_id)
+    tts_engine = Speaker(config.elevenlabs_api_key, config.elevenlabs_voice_id)
     router = CommandRouter(build_skill_registry(config))
 
     logger.info("RICO is online. Awaiting your command, Sir.")
@@ -74,7 +74,7 @@ def _should_exit(text: str) -> bool:
 
 def _run_conversation_loop(
     stt_engine: SpeechToTextEngine,
-    tts_engine: ElevenLabsTTS,
+    tts_engine: Speaker,
     router: CommandRouter,
     silence_timeout: float,
 ) -> None:
