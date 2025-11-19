@@ -73,10 +73,20 @@ def _run_search(client: OpenAI, query: str) -> str:
     response = client.responses.create(
         model="gpt-4.1",
         input=f"{instruction}\nQuery: {query}",
-        web_search={"bing_query": [{"q": query}], "n_tokens": 2048},
+        tools=[
+            {
+                "type": "web",
+                "web": {
+                    "bing_query": [
+                        {"q": query}
+                    ],
+                    "n_tokens": 2048
+                }
+            }
+        ],
     )
 
-    text = _extract_text(response)
+    text = response.output_text or _extract_text(response)
     if not text:
         return "Sir, the web was oddly silent."
 
