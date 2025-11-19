@@ -24,18 +24,15 @@ class IntentDecision:
 _CLIENT: Optional[OpenAI] = None
 
 _INTENT_PROMPT = (
-    "You classify user requests for RICO. Decide if the query demands live web "
-    "information. Avoid keyword heuristics; rely on comprehension."
+    "Classify the user request for RICO. Use comprehension, not keywords."
 )
 
 _GUIDELINES = (
-    "Return JSON with requires_web (bool), skill (web_search or conversation), "
-    "and confidence (0-1). requires_web is true only when the user needs "
-    "time-sensitive data such as news, recent events, prices, weather, sports "
-    "results, scandals, or ongoing situations. It is false for feelings, "
-    "opinions, jokes, creative work, general reasoning, or questions about "
-    "RICO. Choose skill web_search when requires_web is true, otherwise "
-    "conversation."
+    "Reply as JSON with requires_web (bool), skill (web_search or conversation),"
+    " confidence (0-1). requires_web only when the user clearly needs current,"
+    " external facts such as prices, weather, scores, fresh news, or ongoing"
+    " events. For feelings, opinions, advice, creative work, or questions about"
+    " RICO, keep requires_web false."
 )
 
 
@@ -72,7 +69,7 @@ def detect_intent(text: str) -> IntentDecision:
             messages=[
                 {"role": "system", "content": _INTENT_PROMPT},
                 {"role": "system", "content": _GUIDELINES},
-                {"role": "user", "content": f"User message: {text}"},
+                {"role": "user", "content": text},
             ],
             temperature=0,
         )

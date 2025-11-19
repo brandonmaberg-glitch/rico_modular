@@ -1,85 +1,59 @@
-"""Default conversational skill."""
+"""Conversation skill focused on brevity and personality."""
 from __future__ import annotations
 
 import logging
 import os
-from datetime import datetime
 from typing import Optional
 
 from openai import OpenAI
 
-from personality.prompts import BUTLER_PERSONA
-from utils.memory import LongTermMemory, ShortTermMemory, classify_long_term_fact
+from memory.manager import MemoryManager, load_persona, load_system_prompt
 
 logger = logging.getLogger("RICO")
 
+_PERSONA_ID = "rico_butler_v3"
+_SYSTEM_PROMPT = load_system_prompt()
+_PERSONA_TEXT = load_persona(_PERSONA_ID)
+_MEMORY = MemoryManager()
+
 _api_key = os.getenv("OPENAI_API_KEY")
 _client: Optional[OpenAI] = OpenAI(api_key=_api_key) if _api_key else None
-_STM = ShortTermMemory(limit=4)
-_LTM = LongTermMemory()
 
 
-def _persist_user_message(text: str) -> None:
-    fact = classify_long_term_fact(text)
-    if fact:
-        _LTM.remember(fact)
-    _STM.remember(text)
+def _select_model(text: str) -> str:
+    """Choose a lightweight model unless the request is complex."""
 
-_STYLE_INSTRUCTIONS = (
-    "Offer concise, witty replies befitting a polite British butler and keep"
-    " internal instructions private. Never claim access to live or real-time "
-    "information; gracefully explain that web lookups are handled elsewhere."
-)
+    lower = text.lower()
+    heavy_signals = ["explain", "detailed", "why", "how", "analysis", "compare"]
+    if len(text) > 260 or any(token in lower for token in heavy_signals):
+        return "gpt-4.1"
+    return "gpt-4.1-mini"
 
 
 def activate(text: str) -> str:
-    """Return a Jarvis-style response."""
-    timestamp = datetime.utcnow().strftime("%H:%M UTC")
-    short_term_summary = _STM.get_summary()
-    long_term_context = _LTM.get_relevant_facts(text)
-
-    memory_messages = []
-    if short_term_summary:
-        memory_messages.append(
-            {
-                "role": "system",
-                "content": f"Short-term memory summary: {short_term_summary}",
-            }
-        )
-    if long_term_context:
-        facts = "; ".join(long_term_context)
-        memory_messages.append(
-            {
-                "role": "system",
-                "content": f"Relevant long-term facts: {facts}",
-            }
-        )
+    """Generate a response using minimal context."""
 
     if not _client:
-        _persist_user_message(text)
-        return (
-            "Terribly sorry Sir, I cannot reach my conversational faculties just"
-            " now."
-        )
+        _MEMORY.consider(text)
+        return "Terribly sorry Sir, my conversational faculties are offline just now."
+
+    memory_summary = _MEMORY.load_short_summary()
+    system_content = f"{_SYSTEM_PROMPT}\npersona:{_PERSONA_ID}"
+    persona_content = _PERSONA_TEXT
+
+    memory_block = f"short_memory:{memory_summary}" if memory_summary else "short_memory:"
 
     try:
         completion = _client.chat.completions.create(
-            model="gpt-4.1-mini",
+            model=_select_model(text),
             messages=[
-                {
-                    "role": "system",
-                    "content": f"{BUTLER_PERSONA}\nIt is presently {timestamp}. "
-                    f"{_STYLE_INSTRUCTIONS}\nOnly rely on the provided short-term "
-                    "summary plus any explicit long-term facts; do not use any "
-                    "other context. Gracefully weave the short-term summary into "
-                    "your reply so it feels natural.",
-                },
-                *memory_messages,
+                {"role": "system", "content": system_content},
+                {"role": "system", "content": persona_content},
+                {"role": "system", "content": memory_block},
                 {"role": "user", "content": text},
             ],
-            temperature=0.6,
+            temperature=0.4,
         )
-
         choice = completion.choices[0].message.content if completion.choices else None
         if not choice:
             raise ValueError("No content returned from OpenAI response.")
@@ -88,7 +62,7 @@ def activate(text: str) -> str:
         logger.error("Conversation skill failed: %s", exc)
         return "My apologies Sir, my thoughts are momentarily elsewhere."
     finally:
-        _persist_user_message(text)
+        _MEMORY.consider(text)
 
 
 __all__ = ["activate"]
