@@ -1,10 +1,8 @@
 """Speech-to-text pipeline using OpenAI APIs with fallbacks."""
 from __future__ import annotations
 
-import os
 import select
 import sys
-import time
 from dataclasses import dataclass
 from typing import Optional
 
@@ -48,64 +46,15 @@ class SpeechToTextEngine:
     def _fallback_transcription(self, timeout: Optional[float]) -> TranscriptionResult:
         """Text-based fallback that simulates transcription with an optional timeout."""
         if timeout is not None:
-            raw = self._timed_input(timeout)
-            if raw is None:
+            ready, _, _ = select.select([sys.stdin], [], [], timeout)
+            if not ready:
                 return TranscriptionResult(text="", timed_out=True)
-        else:
-            raw = None
         try:
             if raw is None:
                 raw = input("Speak now (type your request): ")
         except (EOFError, KeyboardInterrupt):
             raw = ""
         return TranscriptionResult(text=clean_transcription(raw), timed_out=False)
-
-    def _timed_input(self, timeout: float) -> Optional[str]:
-        """Return input text if available before timeout; otherwise None."""
-        if os.name == "nt":
-            return self._timed_input_windows(timeout)
-
-        ready, _, _ = select.select([sys.stdin], [], [], timeout)
-        if not ready:
-            return None
-        return input("Speak now (type your request): ")
-
-    def _timed_input_windows(self, timeout: float) -> Optional[str]:
-        """Windows-compatible timed input using msvcrt."""
-        try:
-            import msvcrt
-        except ImportError:  # pragma: no cover - platform guard
-            return None
-
-        prompt = "Speak now (type your request): "
-        print(prompt, end="", flush=True)
-        buffer: list[str] = []
-        start = time.time()
-
-        while True:
-            if msvcrt.kbhit():
-                ch = msvcrt.getwch()
-                if ch in ("\r", "\n"):
-                    print()
-                    return "".join(buffer)
-                if ch == "\003":  # Ctrl+C
-                    raise KeyboardInterrupt
-                if ch in ("\b", "\x7f"):
-                    if buffer:
-                        buffer.pop()
-                        print("\b \b", end="", flush=True)
-                else:
-                    buffer.append(ch)
-                    print(ch, end="", flush=True)
-
-            if time.time() - start >= timeout:
-                if buffer:
-                    print()
-                    return "".join(buffer)
-                print()
-                return None
-
-            time.sleep(0.05)
 
 
 __all__ = ["SpeechToTextEngine", "TranscriptionResult"]
