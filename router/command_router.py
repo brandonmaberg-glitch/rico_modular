@@ -26,7 +26,7 @@ class CommandRouter:
             intent.confidence,
         )
 
-        if intent.requires_web:
+        if intent.requires_web and intent.confidence >= 0.35:
             return self.skills["web_search"](text)
 
         return self.skills["conversation"](text)
