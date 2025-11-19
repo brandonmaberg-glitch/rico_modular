@@ -13,7 +13,23 @@ class CommandRouter:
     def route(self, text: str) -> str:
         """Route text to the most appropriate skill."""
         lowered = text.lower()
-        if any(keyword in lowered for keyword in ["status", "cpu", "memory", "time"]):
+        if any(
+            phrase in lowered
+            for phrase in [
+                "what's the time",
+                "whats the time",
+                "what is the time",
+                "tell me the time",
+                "current time",
+                "local time",
+                "time is it",
+            ]
+        ):
+            return self.skills["conversation"](text)
+        if any(
+            keyword in lowered
+            for keyword in ["system status", "system info", "cpu", "processor", "memory", "memory usage", "system vitals", "performance"]
+        ):
             return self.skills["system_status"](text)
         if any(keyword in lowered for keyword in ["search", "google", "web"]):
             return self.skills["web_search"](text)
