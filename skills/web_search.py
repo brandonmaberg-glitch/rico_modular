@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from typing import Any, Dict, List, Optional
 
 from openai import OpenAI
@@ -18,9 +19,9 @@ _STYLE_PROMPT = (
 
 _REFINE_PROMPT = (
     "You are RICO, a succinct British butler. Rewrite the provided tool output "
-    "into at most three sentences (250 characters max) unless the user "
-    "explicitly asks for extended detail. Maintain citations if supplied and "
-    "sound poised yet warm."
+    "into 2-3 sentences no longer than 350 characters. Avoid raw URLs, "
+    "debug-style output, or trailing half-sentences. Maintain citations if "
+    "supplied and keep the tone poised yet warm."
 )
 
 
@@ -72,6 +73,35 @@ def _extract_text(response: Any) -> str:
     return "\n".join(chunks).strip()
 
 
+def _clean_urls(text: str) -> str:
+    """Remove bare URLs from the response text."""
+
+    return re.sub(r"https?://\S+", "", text)
+
+
+def _trim_sentences(text: str, limit: int = 350) -> str:
+    """Limit text to whole sentences within the character budget."""
+
+    sentences = re.split(r"(?<=[.!?])\s+", text.strip())
+    kept: List[str] = []
+    total = 0
+
+    for sentence in sentences:
+        if not sentence:
+            continue
+        potential = total + len(sentence)
+        if kept:
+            potential += 1  # space
+        if potential > limit:
+            break
+        kept.append(sentence)
+        total = potential
+        if len(kept) == 3:
+            break
+
+    return " ".join(kept).strip()
+
+
 def _detail_requested(query: str) -> bool:
     """Return True if the user explicitly wants extended detail."""
 
@@ -97,9 +127,11 @@ def _refine_response(
         return ""
 
     constraints = (
-        "Summarise in no more than three sentences and 250 characters."
+        "Summarise in exactly 2-3 complete sentences and no more than 350 "
+        "characters."
         if not allow_expanded
-        else "Summarise in a few sentences; detail was explicitly requested."
+        else "Summarise in 2-3 polished sentences (max 350 characters) while "
+        "respecting any explicit request for detail."
     )
 
     messages: List[Dict[str, Any]] = [
@@ -122,12 +154,13 @@ def _refine_response(
         logger.warning("Response refinement failed: %s", exc)
         refined = raw_text
 
-    refined = refined.strip()
+    refined = _clean_urls(refined).strip()
     if not refined:
-        refined = raw_text.strip()
+        refined = _clean_urls(raw_text).strip()
 
-    if len(refined) > 250 and not allow_expanded:
-        refined = refined[:247].rstrip() + "..."
+    refined = _trim_sentences(refined, limit=350)
+    if not refined:
+        refined = _trim_sentences(_clean_urls(raw_text), limit=350)
 
     return refined
 
@@ -164,7 +197,10 @@ def run_web_search(query: str) -> str:
         final_message = _extract_text(response)
 
         if not final_message:
-            raise ValueError("OpenAI returned no content for web search.")
+            return (
+                "Sir, I regret the search yielded nothing useful. Perhaps try asking "
+                "in another manner?"
+            )
 
         return _refine_response(
             client=client, raw_text=final_message, query=query, allow_expanded=detailed
