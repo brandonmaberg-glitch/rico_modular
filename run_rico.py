@@ -1,13 +1,18 @@
 """Runtime entry point for the RICO assistant."""
 from __future__ import annotations
 
+import logging
+
 from config.settings import AppConfig
 from logs.logger import setup_logger
 from router.command_router import CommandRouter
 from skills import car_info, conversation, system_status, web_search
-from stt.base import SpeechToTextEngine
+from stt.base import SpeechToTextEngine, TranscriptionResult
 from tts.elevenlabs_tts import ElevenLabsTTS
 from wakeword.engine import WakeWordEngine
+
+
+logger = logging.getLogger("RICO")
 
 
 def build_skill_registry(config: AppConfig):
@@ -22,6 +27,7 @@ def build_skill_registry(config: AppConfig):
 
 def main() -> None:
     """Start the assistant."""
+    global logger
     config = AppConfig.load()
     logger = setup_logger()
     logger.info("Initialising RICO...")
@@ -39,18 +45,13 @@ def main() -> None:
                 logger.info("Wakeword listener stopped. Shutting down.")
                 break
 
-            logger.info("Wakeword detected. Listening...")
-            transcription = stt_engine.transcribe()
-            logger.info("Transcription: %s", transcription)
-
-            if not transcription:
-                logger.warning("No speech detected.")
-                tts_engine.speak("I am terribly sorry Sir, I did not catch that.")
-                continue
-
-            response = router.route(transcription)
-            logger.info("Skill response: %s", response)
-            tts_engine.speak(response)
+            logger.info("Wakeword detected. Entering conversation mode...")
+            _run_conversation_loop(
+                stt_engine=stt_engine,
+                tts_engine=tts_engine,
+                router=router,
+                silence_timeout=20.0,
+            )
         except KeyboardInterrupt:
             logger.info("Keyboard interrupt received. Exiting gracefully.")
             break
@@ -61,6 +62,55 @@ def main() -> None:
             )
 
     logger.info("RICO has powered down.")
+
+
+_EXIT_PHRASES = ["rico, stop listening", "that's all, rico", "that’s all, rico"]
+
+
+def _should_exit(text: str) -> bool:
+    lowered = text.strip().lower()
+    return any(phrase in lowered for phrase in _EXIT_PHRASES)
+
+
+def _run_conversation_loop(
+    stt_engine: SpeechToTextEngine,
+    tts_engine: ElevenLabsTTS,
+    router: CommandRouter,
+    silence_timeout: float,
+) -> None:
+    """Maintain an active conversation until an exit condition is met."""
+
+    while True:
+        transcription = stt_engine.transcribe(timeout=silence_timeout)
+        if isinstance(transcription, TranscriptionResult):
+            result = transcription
+        else:  # pragma: no cover - defensive for legacy return
+            result = TranscriptionResult(text=str(transcription), timed_out=False)
+
+        if result.timed_out:
+            logger.info(
+                "Silence timeout reached after %.0f seconds; exiting conversation mode.",
+                silence_timeout,
+            )
+            tts_engine.speak("Very well, Sir.")
+            break
+
+        text = result.text.strip()
+        logger.info("Transcription: %s", text)
+
+        if not text:
+            logger.warning("No speech detected.")
+            tts_engine.speak("I am terribly sorry Sir, I did not catch that.")
+            continue
+
+        if _should_exit(text):
+            logger.info("Exit phrase detected; ending conversation mode.")
+            tts_engine.speak("Very well, Sir.")
+            break
+
+        response = router.route(text)
+        logger.info("Skill response: %s", response)
+        tts_engine.speak(response)
 
 
 if __name__ == "__main__":

@@ -82,14 +82,7 @@ def activate(text: str) -> str:
         choice = completion.choices[0].message.content if completion.choices else None
         if not choice:
             raise ValueError("No content returned from OpenAI response.")
-        response = choice.strip()
-
-        if short_term_summary:
-            response = (
-                f"{response}\n\nI still have in mind: {short_term_summary}"
-            )
-
-        return response
+        return choice.strip()
     except Exception as exc:  # pragma: no cover - defensive
         logger.error("Conversation skill failed: %s", exc)
         return "My apologies Sir, my thoughts are momentarily elsewhere."
