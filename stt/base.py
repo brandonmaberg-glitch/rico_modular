@@ -1,6 +1,9 @@
 """Speech-to-text pipeline using OpenAI APIs with fallbacks."""
 from __future__ import annotations
 
+import select
+import sys
+from dataclasses import dataclass
 from typing import Optional
 
 try:
@@ -9,6 +12,14 @@ except Exception:  # pragma: no cover - optional dependency
     OpenAI = None  # type: ignore
 
 from utils.text import clean_transcription
+
+
+@dataclass
+class TranscriptionResult:
+    """Container for speech-to-text results."""
+
+    text: str
+    timed_out: bool = False
 
 
 class SpeechToTextEngine:
@@ -23,22 +34,26 @@ class SpeechToTextEngine:
             except Exception:
                 self._client = None
 
-    def transcribe(self) -> str:
+    def transcribe(self, timeout: Optional[float] = None) -> TranscriptionResult:
         """Return a cleaned transcription of the current user request."""
         if not self._client:
-            return self._fallback_transcription()
+            return self._fallback_transcription(timeout)
 
         # Placeholder: replace with real audio capture + Whisper call.
         # To keep the runtime interactive without audio, fall back to text input.
-        return self._fallback_transcription()
+        return self._fallback_transcription(timeout)
 
-    def _fallback_transcription(self) -> str:
-        """Text-based fallback that simulates transcription."""
+    def _fallback_transcription(self, timeout: Optional[float]) -> TranscriptionResult:
+        """Text-based fallback that simulates transcription with an optional timeout."""
+        if timeout is not None:
+            ready, _, _ = select.select([sys.stdin], [], [], timeout)
+            if not ready:
+                return TranscriptionResult(text="", timed_out=True)
         try:
             raw = input("Speak now (type your request): ")
         except (EOFError, KeyboardInterrupt):
             raw = ""
-        return clean_transcription(raw)
+        return TranscriptionResult(text=clean_transcription(raw), timed_out=False)
 
 
-__all__ = ["SpeechToTextEngine"]
+__all__ = ["SpeechToTextEngine", "TranscriptionResult"]
