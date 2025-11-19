@@ -50,7 +50,8 @@ class SpeechToTextEngine:
             if not ready:
                 return TranscriptionResult(text="", timed_out=True)
         try:
-            raw = input("Speak now (type your request): ")
+            if raw is None:
+                raw = input("Speak now (type your request): ")
         except (EOFError, KeyboardInterrupt):
             raw = ""
         return TranscriptionResult(text=clean_transcription(raw), timed_out=False)
