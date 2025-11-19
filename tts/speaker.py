@@ -51,6 +51,7 @@ class Speaker:
                 voice=self.voice_id,
                 model="eleven_monolingual_v1",
                 voice_settings=VoiceSettings(stability=0.4, similarity_boost=0.75),
+                output_format="wav",
             )
         except Exception as exc:  # pragma: no cover - defensive around external call
             logger.error("ElevenLabs generation failed: %s", exc)
