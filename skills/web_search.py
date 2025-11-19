@@ -3,9 +3,10 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Any, Optional
+from typing import Any, Optional, Sequence, get_args, get_type_hints
 
 from openai import OpenAI
+from openai.types.responses import WebSearchToolParam
 
 from memory.manager import load_persona, load_system_prompt
 
@@ -15,6 +16,7 @@ _client: Optional[OpenAI] = None
 _PERSONA_ID = "rico_butler_v3"
 _SYSTEM_PROMPT = load_system_prompt()
 _PERSONA_TEXT = load_persona(_PERSONA_ID)
+_WEB_TOOL_TYPE: Optional[str] = None
 
 
 def _get_client() -> Optional[OpenAI]:
@@ -31,6 +33,36 @@ def _get_client() -> Optional[OpenAI]:
 
     _client = OpenAI(api_key=api_key)
     return _client
+
+
+def _detect_web_tool_type() -> Optional[str]:
+    """Return a supported web-search tool type for this client."""
+
+    global _WEB_TOOL_TYPE  # pylint: disable=global-statement
+
+    if _WEB_TOOL_TYPE:
+        return _WEB_TOOL_TYPE
+
+    try:
+        type_hint = get_type_hints(WebSearchToolParam).get("type")
+        options: Sequence[str] = [
+            opt for opt in get_args(type_hint) if isinstance(opt, str)
+        ] if type_hint else []
+
+        preferred_order = ("web_search", "web_search_2025_08_26")
+        for candidate in preferred_order:
+            if candidate in options:
+                _WEB_TOOL_TYPE = candidate
+                break
+
+        if not _WEB_TOOL_TYPE and options:
+            _WEB_TOOL_TYPE = options[0]
+
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.error("Failed to detect web search tool type: %s", exc)
+        _WEB_TOOL_TYPE = None
+
+    return _WEB_TOOL_TYPE
 
 
 def _extract_text(message: Any) -> str:
@@ -70,20 +102,14 @@ def _run_search(client: OpenAI, query: str) -> str:
         " reply in 1 to 3 concise sentences, no more than 350 characters."
     )
 
+    tool_type = _detect_web_tool_type()
+    if not tool_type:
+        return "My apologies Sir, but the web search apparatus lacks a supported tool."
+
     response = client.responses.create(
         model="gpt-4.1",
         input=f"{instruction}\nQuery: {query}",
-        tools=[
-            {
-                "type": "web",
-                "web": {
-                    "bing_query": [
-                        {"q": query}
-                    ],
-                    "n_tokens": 2048
-                }
-            }
-        ],
+        tools=[{"type": tool_type}],
     )
 
     text = response.output_text or _extract_text(response)
