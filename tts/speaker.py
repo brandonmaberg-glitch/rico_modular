@@ -1,4 +1,4 @@
-"""Text-to-speech playback powered by ElevenLabs and simpleaudio."""
+"""Text-to-speech playback using ElevenLabs and playsound3."""
 from __future__ import annotations
 
 import logging
@@ -8,23 +8,23 @@ import tempfile
 from typing import Optional
 
 try:  # pragma: no cover - optional dependency
+    import playsound3  # type: ignore
+except Exception:  # pragma: no cover - optional dependency
+    playsound3 = None  # type: ignore
+
+try:  # pragma: no cover - optional dependency
     from elevenlabs import VoiceSettings, generate, set_api_key  # type: ignore
 except Exception:  # pragma: no cover - optional dependency
     VoiceSettings = None  # type: ignore
     generate = None  # type: ignore
     set_api_key = None  # type: ignore
 
-try:  # pragma: no cover - optional dependency
-    from simpleaudio import WaveObject  # type: ignore
-except Exception:  # pragma: no cover - optional dependency
-    WaveObject = None  # type: ignore
-
 
 logger = logging.getLogger(__name__)
 
 
 class Speaker:
-    """Handle speech synthesis and playback."""
+    """Handle speech synthesis and synchronous playback."""
 
     def __init__(self, api_key: Optional[str], voice_id: Optional[str]) -> None:
         self.api_key = api_key
@@ -57,8 +57,8 @@ class Speaker:
             print(f"RICO (spoken): {text}")
             return
 
-        if WaveObject is None:
-            logger.error("simpleaudio is not installed; cannot play audio.")
+        if playsound3 is None:
+            logger.error("playsound3 is not installed; cannot play audio.")
             print(f"RICO (spoken): {text}")
             return
 
@@ -68,12 +68,12 @@ class Speaker:
                 temp_file = pathlib.Path(tmp.name)
                 tmp.write(audio_bytes)
 
-            wave = WaveObject.from_wave_file(str(temp_file))
-            play_obj = wave.play()
-            play_obj.wait_done()
-        except Exception as exc:  # pragma: no cover - playback errors
-            logger.error("Audio playback failed: %s", exc)
-            print(f"RICO (spoken): {text}")
+            try:
+                playsound3.playsound(str(temp_file), block=True)
+            except Exception as exc:  # pragma: no cover - playback errors
+                logger.error("Audio playback failed: %s", exc)
+                print("Apologies, I couldn't play that audio, but I'll keep going.")
+                print(f"RICO (spoken): {text}")
         finally:
             if temp_file and temp_file.exists():
                 try:
