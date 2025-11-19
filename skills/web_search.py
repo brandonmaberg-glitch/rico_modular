@@ -17,6 +17,7 @@ _PERSONA_ID = "rico_butler_v3"
 _SYSTEM_PROMPT = load_system_prompt()
 _PERSONA_TEXT = load_persona(_PERSONA_ID)
 _WEB_TOOL_TYPE: Optional[str] = None
+_DEFAULT_WEB_TOOL_TYPE = "web_search"
 
 
 def _get_client() -> Optional[OpenAI]:
@@ -35,7 +36,7 @@ def _get_client() -> Optional[OpenAI]:
     return _client
 
 
-def _detect_web_tool_type() -> Optional[str]:
+def _detect_web_tool_type() -> str:
     """Return a supported web-search tool type for this client."""
 
     global _WEB_TOOL_TYPE  # pylint: disable=global-statement
@@ -49,18 +50,18 @@ def _detect_web_tool_type() -> Optional[str]:
             opt for opt in get_args(type_hint) if isinstance(opt, str)
         ] if type_hint else []
 
-        preferred_order = ("web_search", "web_search_2025_08_26")
+        preferred_order = (_DEFAULT_WEB_TOOL_TYPE, "web_search_2025_08_26")
         for candidate in preferred_order:
             if candidate in options:
                 _WEB_TOOL_TYPE = candidate
                 break
 
-        if not _WEB_TOOL_TYPE and options:
-            _WEB_TOOL_TYPE = options[0]
+        if not _WEB_TOOL_TYPE:
+            _WEB_TOOL_TYPE = options[0] if options else _DEFAULT_WEB_TOOL_TYPE
 
     except Exception as exc:  # pragma: no cover - defensive
         logger.error("Failed to detect web search tool type: %s", exc)
-        _WEB_TOOL_TYPE = None
+        _WEB_TOOL_TYPE = _DEFAULT_WEB_TOOL_TYPE
 
     return _WEB_TOOL_TYPE
 
@@ -81,7 +82,12 @@ def _extract_text(message: Any) -> str:
                 if text:
                     parts.append(text)
             elif getattr(block, "text", None):
-                parts.append(block.text)
+                text_obj = block.text
+                text_value = getattr(text_obj, "value", None) if text_obj else None
+                if text_value:
+                    parts.append(text_value)
+                else:
+                    parts.append(str(text_obj))
 
     if not parts:
         for fallback_attr in ("output_text", "output_string"):
@@ -103,13 +109,11 @@ def _run_search(client: OpenAI, query: str) -> str:
     )
 
     tool_type = _detect_web_tool_type()
-    if not tool_type:
-        return "My apologies Sir, but the web search apparatus lacks a supported tool."
 
     response = client.responses.create(
         model="gpt-4.1",
         input=f"{instruction}\nQuery: {query}",
-        tools=[{"type": tool_type}],
+        tools=[WebSearchToolParam(type=tool_type)],
     )
 
     text = response.output_text or _extract_text(response)
