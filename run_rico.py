@@ -34,7 +34,11 @@ def main() -> None:
 
     wake_engine = WakeWordEngine()
     stt_engine = SpeechToTextEngine(config.openai_api_key)
-    tts_engine = Speaker(config.elevenlabs_api_key, config.elevenlabs_voice_id)
+    tts_engine = Speaker(
+        openai_api_key=config.openai_api_key,
+        elevenlabs_api_key=config.elevenlabs_api_key,
+        voice_id=config.elevenlabs_voice_id,
+    )
     router = CommandRouter(build_skill_registry(config))
 
     logger.info("RICO is online. Awaiting your command, Sir.")
@@ -101,6 +105,19 @@ def _run_conversation_loop(
         if not text:
             logger.warning("No speech detected.")
             tts_engine.speak("I am terribly sorry Sir, I did not catch that.")
+            continue
+
+        if text.lower() == "voice":
+            if tts_engine.provider == "elevenlabs":
+                if tts_engine.switch_to_openai():
+                    tts_engine.speak("Reverting to the OpenAI voice, Sir.")
+                else:
+                    tts_engine.speak("OpenAI voice is unavailable, Sir.")
+            else:
+                if tts_engine.switch_to_elevenlabs():
+                    tts_engine.speak("Switching to your ElevenLabs voice, Sir.")
+                else:
+                    tts_engine.speak("ElevenLabs voice is unavailable, Sir.")
             continue
 
         if _should_exit(text):
