@@ -157,7 +157,7 @@ class Speaker:
 
             response = self._elevenlabs_client.text_to_speech.convert(
                 voice_id=self.voice_id,
-                model_id="eleven_monolingual_v1",
+                model_id="eleven_turbo_v2_5",
                 text=text,
                 voice_settings=voice_settings,
                 output_format="mp3_44100_128",
