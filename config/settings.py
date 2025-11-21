@@ -3,6 +3,10 @@ load_dotenv()
 """Configuration management for the RICO assistant."""
 from __future__ import annotations
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 from dataclasses import dataclass
 from typing import Optional
 
