@@ -57,6 +57,19 @@ def _needs_context(text: str) -> bool:
     return any(word in lowered.split() for word in pronouns) and bool(_CONTEXT.get("topic"))
 
 
+def set_context_topic(topic: Optional[str]) -> None:
+    """Persist the most recent topic for light-weight follow ups."""
+
+    if topic:
+        _CONTEXT["topic"] = topic.strip() or None
+
+
+def detect_topic(text: str) -> Optional[str]:
+    """Expose subject extraction so other skills can keep context fresh."""
+
+    return _extract_subject(text)
+
+
 def _build_context_message() -> Optional[dict]:
     topic = _CONTEXT.get("topic")
     if not topic:
@@ -87,9 +100,9 @@ def activate(text: str) -> str:
 
     memory_block = f"short_memory:{memory_summary}" if memory_summary else "short_memory:"
 
-    subject = _extract_subject(text)
+    subject = detect_topic(text)
     if subject:
-        _CONTEXT["topic"] = subject
+        set_context_topic(subject)
     context_message = _build_context_message() if _needs_context(text) else None
 
     try:
@@ -118,4 +131,4 @@ def activate(text: str) -> str:
         _MEMORY.consider(text)
 
 
-__all__ = ["activate"]
+__all__ = ["activate", "detect_topic", "set_context_topic"]
