@@ -7,6 +7,7 @@ from typing import Any, Optional, Sequence, get_args, get_type_hints
 
 from openai import OpenAI
 from openai.types.responses import WebSearchToolParam
+from ui_bridge import send_image_results, send_web_preview
 
 from memory.manager import load_persona, load_system_prompt
 
@@ -99,6 +100,81 @@ def _extract_text(message: Any) -> str:
     return "\n".join(parts).strip()
 
 
+def _safe_to_dict(response: Any) -> dict:
+    for attr in ("model_dump", "to_dict", "dict"):
+        fn = getattr(response, attr, None)
+        if callable(fn):
+            try:
+                return fn()
+            except Exception:  # pragma: no cover - defensive
+                continue
+    return getattr(response, "__dict__", {}) or {}
+
+
+def _collect_image_urls(data: Any) -> list[str]:
+    urls: list[str] = []
+    valid_suffixes = (".jpg", ".jpeg", ".png", ".gif", ".webp")
+
+    def _walk(node: Any) -> None:
+        if isinstance(node, str) and node.startswith("http"):
+            if any(node.lower().endswith(ext) for ext in valid_suffixes):
+                if node not in urls:
+                    urls.append(node)
+        elif isinstance(node, dict):
+            for value in node.values():
+                _walk(value)
+        elif isinstance(node, (list, tuple)):
+            for item in node:
+                _walk(item)
+
+    _walk(data)
+    return urls
+
+
+def _collect_preview(data: Any) -> Optional[dict]:
+    def _walk(node: Any) -> Optional[dict]:
+        if isinstance(node, dict):
+            title = node.get("title") or node.get("name")
+            url = node.get("url") or node.get("link")
+            snippet = node.get("snippet") or node.get("description") or node.get("summary")
+            image = node.get("image") or node.get("image_url") or node.get("thumbnail")
+            if title and url and snippet:
+                return {
+                    "title": str(title),
+                    "url": str(url),
+                    "snippet": str(snippet),
+                    "image": str(image) if image else None,
+                }
+            for value in node.values():
+                found = _walk(value)
+                if found:
+                    return found
+        elif isinstance(node, (list, tuple)):
+            for item in node:
+                found = _walk(item)
+                if found:
+                    return found
+        return None
+
+    return _walk(data)
+
+
+def _broadcast_results(response: Any) -> None:
+    data = _safe_to_dict(response)
+    images = _collect_image_urls(data)
+    if images:
+        send_image_results(images)
+
+    preview = _collect_preview(data)
+    if preview:
+        send_web_preview(
+            preview.get("title", ""),
+            preview.get("snippet", ""),
+            preview.get("url", ""),
+            preview.get("image"),
+        )
+
+
 def _run_search(client: OpenAI, query: str) -> str:
     """Execute the web search tool and collapse to 1-3 sentences."""
 
@@ -117,6 +193,7 @@ def _run_search(client: OpenAI, query: str) -> str:
     )
 
     text = response.output_text or _extract_text(response)
+    _broadcast_results(response)
     if not text:
         return "Sir, the web was oddly silent."
 
