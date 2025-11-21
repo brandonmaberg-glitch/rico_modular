@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from typing import Any, Optional, Sequence, get_args, get_type_hints
 from urllib.parse import urlparse
 
@@ -10,7 +11,11 @@ from openai import OpenAI
 from openai.types.responses import WebSearchToolParam
 from ui_bridge import send_image_results, send_web_preview
 
-from skills.conversation import detect_topic, set_context_topic
+from skills.conversation import (
+    detect_subject,
+    get_context_subject,
+    set_context_topic,
+)
 from memory.manager import load_persona, load_system_prompt
 
 logger = logging.getLogger("RICO")
@@ -21,6 +26,46 @@ _SYSTEM_PROMPT = load_system_prompt()
 _PERSONA_TEXT = load_persona(_PERSONA_ID)
 _WEB_TOOL_TYPE: Optional[str] = None
 _DEFAULT_WEB_TOOL_TYPE = "web_search"
+
+
+def _mentions_pronoun_image(query: str) -> bool:
+    lowered = query.lower()
+    if re.search(r"\b(picture|image) of\s+(him|her|them|it)\b", lowered):
+        return True
+    if re.search(r"what does\s+(he|she|they|it)\s+look like", lowered):
+        return True
+    return False
+
+
+def _has_explicit_non_pronoun_subject(query: str) -> bool:
+    lowered = query.lower()
+    match = re.search(r"(picture|image) of\s+([\w\s]+)", lowered)
+    if not match:
+        return False
+    subject_phrase = match.group(2).strip()
+    if not subject_phrase:
+        return False
+    pronouns = {"him", "her", "them", "it", "he", "she", "they", "this", "that"}
+    first_word = subject_phrase.split()[0]
+    return first_word not in pronouns
+
+
+def _is_generic_image_prompt(query: str) -> bool:
+    lowered = query.lower().strip()
+    generic_starts = (
+        "show me a picture",
+        "show me an image",
+        "look up a picture",
+    )
+    return any(lowered.startswith(start) for start in generic_starts)
+
+
+def _should_use_context_subject(query: str) -> bool:
+    if _mentions_pronoun_image(query):
+        return True
+    if _is_generic_image_prompt(query) and not _has_explicit_non_pronoun_subject(query):
+        return True
+    return False
 
 
 def _get_client() -> Optional[OpenAI]:
@@ -186,9 +231,9 @@ def _broadcast_results(response: Any) -> None:
 def _run_search(client: OpenAI, query: str) -> str:
     """Execute the web search tool and collapse to 1-3 sentences."""
 
-    topic = detect_topic(query)
-    if topic:
-        set_context_topic(topic)
+    subject, subject_type = detect_subject(query)
+    if subject:
+        set_context_topic(subject, subject_type)
 
     instruction = (
         f"{_SYSTEM_PROMPT}\npersona:{_PERSONA_ID}\n{_PERSONA_TEXT}\n"
@@ -235,7 +280,12 @@ def run_web_search(query: str) -> str:
         return "My apologies Sir, but the web search apparatus lacks its credentials."
 
     try:
-        return _run_search(client, query)
+        search_query = query
+        if _should_use_context_subject(query):
+            subject, _ = get_context_subject()
+            if subject:
+                search_query = subject
+        return _run_search(client, search_query)
     except Exception as exc:  # pragma: no cover - defensive
         logger.error("Web search failed: %s", exc)
         return "Sorry Sir, I could not retrieve the requested web intelligence."
