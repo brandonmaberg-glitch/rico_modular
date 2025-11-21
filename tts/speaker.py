@@ -1,12 +1,10 @@
 """Text-to-speech playback using OpenAI and ElevenLabs with playsound3."""
 from __future__ import annotations
 
-import io
 import logging
 import os
 import pathlib
 import tempfile
-import wave
 from typing import Optional
 
 try:  # pragma: no cover - optional dependency
@@ -107,8 +105,9 @@ class Speaker:
             return
 
         temp_file: pathlib.Path | None = None
+        suffix = ".wav" if self._provider == "openai" else ".mp3"
         try:
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
+            with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
                 temp_file = pathlib.Path(tmp.name)
                 tmp.write(audio_bytes)
 
@@ -161,27 +160,16 @@ class Speaker:
                 model_id="eleven_monolingual_v1",
                 text=text,
                 voice_settings=voice_settings,
-                output_format="pcm_44100",
+                output_format="mp3_44100_128",
             )
             audio_bytes = b"".join(chunk for chunk in response if chunk)
             if not audio_bytes:
                 logger.error("ElevenLabs returned an empty audio response.")
                 return None
-            return self._convert_pcm_to_wav(audio_bytes)
+            return audio_bytes
         except Exception as exc:  # pragma: no cover - defensive around external call
             logger.error("ElevenLabs generation failed: %s", exc)
             return None
-
-    def _convert_pcm_to_wav(self, audio_bytes: bytes) -> bytes:
-        """Wrap ElevenLabs PCM output in a WAV container for playback."""
-
-        with io.BytesIO() as buffer:
-            with wave.open(buffer, "wb") as wav_file:
-                wav_file.setnchannels(1)
-                wav_file.setsampwidth(2)
-                wav_file.setframerate(44100)
-                wav_file.writeframes(audio_bytes)
-            return buffer.getvalue()
 
 
 __all__ = ["Speaker"]
