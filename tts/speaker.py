@@ -18,11 +18,10 @@ except Exception:  # pragma: no cover - optional dependency
     playsound3 = None  # type: ignore
 
 try:  # pragma: no cover - optional dependency
-    from elevenlabs import VoiceSettings, generate, set_api_key  # type: ignore
+    from elevenlabs import ElevenLabs, VoiceSettings  # type: ignore
 except Exception:  # pragma: no cover - optional dependency
+    ElevenLabs = None  # type: ignore
     VoiceSettings = None  # type: ignore
-    generate = None  # type: ignore
-    set_api_key = None  # type: ignore
 
 
 logger = logging.getLogger(__name__)
@@ -39,6 +38,7 @@ class Speaker:
     ) -> None:
         self.voice_id = voice_id or "21m00Tcm4TlvDq8ikWAM"
         self._openai_client: Optional[OpenAI] = None
+        self._elevenlabs_client: Optional[ElevenLabs] = None
         self._provider: str = "text"
 
         if openai_api_key and OpenAI:
@@ -49,13 +49,13 @@ class Speaker:
                 logger.error("Failed to initialise OpenAI client: %s", exc)
 
         self.elevenlabs_api_key = elevenlabs_api_key
-        if elevenlabs_api_key and set_api_key:
+        if elevenlabs_api_key and ElevenLabs:
             try:
-                set_api_key(elevenlabs_api_key)
+                self._elevenlabs_client = ElevenLabs(api_key=elevenlabs_api_key)
                 if self._provider == "text":
                     self._provider = "elevenlabs"
             except Exception as exc:  # pragma: no cover - defensive
-                logger.error("Failed to set ElevenLabs API key: %s", exc)
+                logger.error("Failed to initialise ElevenLabs client: %s", exc)
 
     @property
     def provider(self) -> str:
@@ -66,7 +66,7 @@ class Speaker:
     def switch_to_elevenlabs(self) -> bool:
         """Switch to ElevenLabs playback if credentials exist."""
 
-        if not (self.elevenlabs_api_key and generate):
+        if not (self._elevenlabs_client and self.elevenlabs_api_key):
             logger.warning("Cannot switch to ElevenLabs: missing API key or SDK.")
             return False
 
@@ -145,18 +145,27 @@ class Speaker:
     def _speak_elevenlabs(self, text: str) -> Optional[bytes]:
         """Generate speech audio using ElevenLabs TTS."""
 
-        if not self.elevenlabs_api_key or not generate:
+        if not self._elevenlabs_client:
             logger.warning("ElevenLabs client unavailable; falling back to text output.")
             return None
 
         try:
-            return generate(
+            voice_settings = None
+            if VoiceSettings:
+                voice_settings = VoiceSettings(stability=0.4, similarity_boost=0.75)
+
+            response = self._elevenlabs_client.text_to_speech.convert(
+                voice_id=self.voice_id,
+                model_id="eleven_monolingual_v1",
                 text=text,
-                voice=self.voice_id,
-                model="eleven_monolingual_v1",
-                voice_settings=VoiceSettings(stability=0.4, similarity_boost=0.75),
+                voice_settings=voice_settings,
                 output_format="wav",
             )
+            audio_bytes = b"".join(chunk for chunk in response if chunk)
+            if not audio_bytes:
+                logger.error("ElevenLabs returned an empty audio response.")
+                return None
+            return audio_bytes
         except Exception as exc:  # pragma: no cover - defensive around external call
             logger.error("ElevenLabs generation failed: %s", exc)
             return None
