@@ -9,6 +9,14 @@ from router.command_router import CommandRouter
 from skills import car_info, conversation, system_status, web_search
 from stt.base import SpeechToTextEngine, TranscriptionResult
 from tts.speaker import Speaker
+from ui_bridge import (
+    launch_ui,
+    send_listening,
+    send_reply,
+    send_thinking,
+    send_transcription,
+    start_ui_server,
+)
 from wakeword.engine import WakeWordEngine
 
 
@@ -31,6 +39,9 @@ def main() -> None:
     config = AppConfig.load()
     logger = setup_logger()
     logger.info("Initialising RICO...")
+
+    start_ui_server()
+    launch_ui()
 
     wake_engine = WakeWordEngine()
     stt_engine = SpeechToTextEngine(config.openai_api_key)
@@ -116,6 +127,7 @@ def _run_conversation_loop(
     """Maintain an active conversation until an exit condition is met."""
 
     while True:
+        send_listening(True)
         transcription = stt_engine.transcribe(timeout=silence_timeout)
         if isinstance(transcription, TranscriptionResult):
             result = transcription
@@ -128,10 +140,12 @@ def _run_conversation_loop(
                 silence_timeout,
             )
             tts_engine.speak("Very well, Sir.")
+            send_listening(False)
             break
 
         text = result.text.strip()
         logger.info("Transcription: %s", text)
+        send_transcription(text)
 
         if not text:
             logger.warning("No speech detected.")
@@ -147,10 +161,14 @@ def _run_conversation_loop(
         if _should_exit(text):
             logger.info("Exit phrase detected; ending conversation mode.")
             tts_engine.speak("Very well, Sir.")
+            send_listening(False)
             break
 
+        send_thinking(0.85)
         response = router.route(text)
         logger.info("Skill response: %s", response)
+        send_thinking(0.0)
+        send_reply(response)
         tts_engine.speak(response)
 
 

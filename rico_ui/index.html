@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RICO | Jarvis HUD</title>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;700&family=Inter:wght@400;600&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+  <div class="hud-grid"></div>
+  <div class="hud-glow"></div>
+  <header class="hud-header">
+    <div class="brand">
+      <img src="assets/rico_mark.svg" alt="RICO" class="brand-mark">
+      <div>
+        <div class="brand-title">RICO Assistant</div>
+        <div class="brand-sub">Jarvis-style control interface</div>
+      </div>
+    </div>
+    <div class="status">
+      <div class="status-dot" id="ws-dot"></div>
+      <div class="status-text" id="ws-status">Connecting...</div>
+    </div>
+  </header>
+
+  <main class="layout">
+    <section class="visualiser-card glass">
+      <div class="ring" id="ring">
+        <div class="ring-core"></div>
+        <div class="ring-wave"></div>
+        <div class="ring-pulse"></div>
+      </div>
+      <div class="ring-caption">RICO Presence</div>
+      <div class="provider" id="provider">Voice: Pending</div>
+    </section>
+
+    <section class="console-card glass">
+      <div class="section-title">Live Console</div>
+      <div class="console" id="console"></div>
+    </section>
+
+    <section class="results-card glass">
+      <div class="section-title">Results & Visuals</div>
+      <div class="results" id="results"></div>
+    </section>
+
+    <section class="widgets-card glass">
+      <div class="section-title">Telemetry & Widgets</div>
+      <div class="widgets" id="widgets">
+        <div class="widget">System status feed will appear here.</div>
+        <div class="widget">Car telemetry placeholder.</div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="hud-footer">
+    <div id="skill-indicator">Skill: standby</div>
+    <div id="listening-indicator">Listening: idle</div>
+  </footer>
+
+  <script src="script.js"></script>
+</body>
+</html>
