@@ -23,6 +23,8 @@ except Exception:  # pragma: no cover - optional dependency
     ElevenLabs = None  # type: ignore
     VoiceSettings = None  # type: ignore
 
+from ui_bridge import send_provider, send_speaking
+
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +59,8 @@ class Speaker:
             except Exception as exc:  # pragma: no cover - defensive
                 logger.error("Failed to initialise ElevenLabs client: %s", exc)
 
+        send_provider(self._provider)
+
     @property
     def provider(self) -> str:
         """Return the active voice provider."""
@@ -71,6 +75,7 @@ class Speaker:
             return False
 
         self._provider = "elevenlabs"
+        send_provider(self._provider)
         return True
 
     def switch_to_openai(self) -> bool:
@@ -81,6 +86,7 @@ class Speaker:
             return False
 
         self._provider = "openai"
+        send_provider(self._provider)
         return True
 
     def speak(self, text: str) -> None:
@@ -89,24 +95,25 @@ class Speaker:
             logger.warning("No text provided for speech synthesis.")
             return
 
-        audio_bytes: Optional[bytes] = None
-        if self._provider == "openai":
-            audio_bytes = self._speak_openai(text)
-        elif self._provider == "elevenlabs":
-            audio_bytes = self._speak_elevenlabs(text)
-
-        if audio_bytes is None:
-            print(f"RICO (spoken): {text}")
-            return
-
-        if playsound3 is None:
-            logger.error("playsound3 is not installed; cannot play audio.")
-            print(f"RICO (spoken): {text}")
-            return
-
         temp_file: pathlib.Path | None = None
-        suffix = ".wav" if self._provider == "openai" else ".mp3"
+        send_speaking(True)
         try:
+            audio_bytes: Optional[bytes] = None
+            if self._provider == "openai":
+                audio_bytes = self._speak_openai(text)
+            elif self._provider == "elevenlabs":
+                audio_bytes = self._speak_elevenlabs(text)
+
+            if audio_bytes is None:
+                print(f"RICO (spoken): {text}")
+                return
+
+            if playsound3 is None:
+                logger.error("playsound3 is not installed; cannot play audio.")
+                print(f"RICO (spoken): {text}")
+                return
+
+            suffix = ".wav" if self._provider == "openai" else ".mp3"
             with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
                 temp_file = pathlib.Path(tmp.name)
                 tmp.write(audio_bytes)
@@ -118,6 +125,7 @@ class Speaker:
                 print("Apologies, I couldn't play that audio, but I'll keep going.")
                 print(f"RICO (spoken): {text}")
         finally:
+            send_speaking(False)
             if temp_file and temp_file.exists():
                 try:
                     os.remove(temp_file)

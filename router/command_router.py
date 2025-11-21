@@ -5,6 +5,7 @@ import logging
 from typing import Callable, Dict
 
 from router.intent import IntentDecision, detect_intent
+from ui_bridge import send_skill
 
 logger = logging.getLogger("RICO")
 
@@ -26,6 +27,8 @@ class CommandRouter:
             intent.confidence,
         )
 
+        selected_skill = "web_search" if intent.requires_web and intent.confidence >= 0.35 else "conversation"
+        send_skill(selected_skill)
         if intent.requires_web and intent.confidence >= 0.35:
             return self.skills["web_search"](text)
 
