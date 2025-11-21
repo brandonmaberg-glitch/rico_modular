@@ -4,11 +4,13 @@ from __future__ import annotations
 import logging
 import os
 from typing import Any, Optional, Sequence, get_args, get_type_hints
+from urllib.parse import urlparse
 
 from openai import OpenAI
 from openai.types.responses import WebSearchToolParam
 from ui_bridge import send_image_results, send_web_preview
 
+from skills.conversation import detect_topic, set_context_topic
 from memory.manager import load_persona, load_system_prompt
 
 logger = logging.getLogger("RICO")
@@ -111,13 +113,19 @@ def _safe_to_dict(response: Any) -> dict:
     return getattr(response, "__dict__", {}) or {}
 
 
+def _looks_like_image_url(url: str, valid_suffixes: tuple[str, ...]) -> bool:
+    parsed = urlparse(url)
+    path = parsed.path.lower()
+    return any(path.endswith(ext) for ext in valid_suffixes)
+
+
 def _collect_image_urls(data: Any) -> list[str]:
     urls: list[str] = []
     valid_suffixes = (".jpg", ".jpeg", ".png", ".gif", ".webp")
 
     def _walk(node: Any) -> None:
         if isinstance(node, str) and node.startswith("http"):
-            if any(node.lower().endswith(ext) for ext in valid_suffixes):
+            if _looks_like_image_url(node, valid_suffixes):
                 if node not in urls:
                     urls.append(node)
         elif isinstance(node, dict):
@@ -177,6 +185,10 @@ def _broadcast_results(response: Any) -> None:
 
 def _run_search(client: OpenAI, query: str) -> str:
     """Execute the web search tool and collapse to 1-3 sentences."""
+
+    topic = detect_topic(query)
+    if topic:
+        set_context_topic(topic)
 
     instruction = (
         f"{_SYSTEM_PROMPT}\npersona:{_PERSONA_ID}\n{_PERSONA_TEXT}\n"
