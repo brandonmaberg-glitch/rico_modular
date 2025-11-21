@@ -23,7 +23,7 @@ except Exception:  # pragma: no cover - optional dependency
     ElevenLabs = None  # type: ignore
     VoiceSettings = None  # type: ignore
 
-from ui_bridge import send_provider, send_speaking
+from ui_bridge import send_provider, send_speaking_end, send_speaking_start
 
 
 logger = logging.getLogger(__name__)
@@ -96,7 +96,7 @@ class Speaker:
             return
 
         temp_file: pathlib.Path | None = None
-        send_speaking(True)
+        started_playback = False
         try:
             audio_bytes: Optional[bytes] = None
             if self._provider == "openai":
@@ -119,13 +119,16 @@ class Speaker:
                 tmp.write(audio_bytes)
 
             try:
+                send_speaking_start()
+                started_playback = True
                 playsound3.playsound(str(temp_file), block=True)
             except Exception as exc:  # pragma: no cover - playback errors
                 logger.error("Audio playback failed: %s", exc)
                 print("Apologies, I couldn't play that audio, but I'll keep going.")
                 print(f"RICO (spoken): {text}")
         finally:
-            send_speaking(False)
+            if started_playback:
+                send_speaking_end()
             if temp_file and temp_file.exists():
                 try:
                     os.remove(temp_file)
