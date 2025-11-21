@@ -1,16 +1,13 @@
-from dotenv import load_dotenv
-load_dotenv()
 """Configuration management for the RICO assistant."""
 from __future__ import annotations
-
-from dotenv import load_dotenv
-
-load_dotenv()
 
 from dataclasses import dataclass
 from typing import Optional
 
+from dotenv import load_dotenv
 from utils.environment import get_env_var
+
+load_dotenv()
 
 
 @dataclass(slots=True)
