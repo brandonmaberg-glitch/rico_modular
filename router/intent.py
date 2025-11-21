@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 from dataclasses import dataclass
 from typing import Optional
 
@@ -36,6 +37,25 @@ _GUIDELINES = (
 )
 
 
+def _is_image_request(text: str) -> bool:
+    lowered = text.lower()
+    direct_phrases = (
+        "show me a picture",
+        "look up a picture",
+        "show me an image",
+    )
+    if any(phrase in lowered for phrase in direct_phrases):
+        return True
+
+    if re.search(r"\b(picture|image) of\s+(him|her|them|it)\b", lowered):
+        return True
+
+    if re.search(r"what does\s+(he|she|they|it)\s+look like", lowered):
+        return True
+
+    return False
+
+
 def _get_client() -> Optional[OpenAI]:
     """Return a cached OpenAI client if credentials are present."""
 
@@ -55,8 +75,16 @@ def _get_client() -> Optional[OpenAI]:
 def detect_intent(text: str) -> IntentDecision:
     """Classify the user's message using an LLM."""
 
-    client = _get_client()
     default = IntentDecision(requires_web=False, skill="conversation", confidence=0.0)
+
+    if _is_image_request(text):
+        return IntentDecision(
+            requires_web=True,
+            skill="web_search",
+            confidence=0.95,
+        )
+
+    client = _get_client()
 
     if not client:
         logger.warning("Intent detection unavailable; defaulting to conversation.")
