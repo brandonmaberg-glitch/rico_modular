@@ -165,23 +165,35 @@ def _looks_like_image_url(url: str, valid_suffixes: tuple[str, ...]) -> bool:
 
 
 def _collect_image_urls(data: Any) -> list[str]:
-    urls: list[str] = []
+    urls = []
     valid_suffixes = (".jpg", ".jpeg", ".png", ".gif", ".webp")
 
-    def _walk(node: Any) -> None:
-        if isinstance(node, str) and node.startswith("http"):
-            if _looks_like_image_url(node, valid_suffixes):
-                if node not in urls:
-                    urls.append(node)
-        elif isinstance(node, dict):
-            for value in node.values():
-                _walk(value)
+    def _extract_from_obj(obj):
+        if not obj:
+            return
+        # direct URL fields
+        for key in ("url", "image", "image_url", "thumbnail"):
+            value = obj.get(key)
+            if isinstance(value, str) and value.startswith("http"):
+                urls.append(value)
+            elif isinstance(value, dict):
+                _extract_from_obj(value)
+
+    def _walk(node):
+        if isinstance(node, dict):
+            _extract_from_obj(node)
+            for v in node.values():
+                _walk(v)
         elif isinstance(node, (list, tuple)):
             for item in node:
                 _walk(item)
+        elif isinstance(node, str) and node.startswith("http"):
+            if any(node.lower().endswith(s) for s in valid_suffixes):
+                urls.append(node)
 
     _walk(data)
-    return urls
+    # Remove duplicates but keep order
+    return list(dict.fromkeys(urls))
 
 
 def _collect_preview(data: Any) -> Optional[dict]:
@@ -223,8 +235,8 @@ def _broadcast_results(response: Any) -> None:
         send_web_preview(
             preview.get("title", ""),
             preview.get("snippet", ""),
-            preview.get("url", ""),
             preview.get("image"),
+            preview.get("url", ""),
         )
 
 
