@@ -107,11 +107,47 @@ class MemoryManager:
     @staticmethod
     def _heuristic_note(text: str) -> Optional[str]:
         lowered = text.lower()
-        triggers = ["prefer", "like", "love", "hate", "dislike", "project", "working on", "job", "car", "partner", "wife", "husband", "team", "goal", "deadline", "remember", "from now on", "always", "never"]
-        if any(token in lowered for token in triggers):
-            snippet = " ".join(text.strip().split())[:150]
-            return snippet
-        return None
+        pronouns = [" i ", " i'm", "i'm ", "i am", " my ", " our "]
+        topics = [
+            "prefer",
+            "like",
+            "love",
+            "hate",
+            "dislike",
+            "project",
+            "working on",
+            "job",
+            "car",
+            "partner",
+            "wife",
+            "husband",
+            "team",
+            "goal",
+            "deadline",
+            "remember",
+            "from now on",
+            "always",
+            "never",
+            "birthday",
+            "anniversary",
+            "diet",
+            "allergy",
+        ]
+
+        if not any(token in lowered for token in topics):
+            return None
+
+        # Avoid storing small talk or general statements without a personal anchor.
+        if not any(pronoun in f" {lowered} " for pronoun in pronouns):
+            return None
+
+        snippet = " ".join(text.strip().split())[:150]
+
+        # Short fragments like "never mind" or compliments are not useful for recall.
+        if len(snippet.split()) < 4:
+            return None
+
+        return snippet
 
     def consider(self, text: str) -> None:
         """Optionally store the user message as a compressed memory."""
