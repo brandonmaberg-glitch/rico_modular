@@ -79,32 +79,18 @@ class WeatherSkill(BaseSkill):
         """Extract a probable location from the user's query."""
 
         if not query:
-            return None
+            return "__use_ip_location__"
 
         lowered = query.lower()
         for keyword in ("benfleet", "south benfleet", "ss7"):
             if keyword in lowered:
                 return "Benfleet"
 
-        for phrase in (
-            "here",
-            "where i am",
-            "my location",
-            "outside",
-            "right now",
-            "near me",
-            "around me",
-            "at my place",
-        ):
-            if phrase in lowered:
-                return "__use_ip_location__"
-
         match = re.search(r"\b(?:in|for|at)\s+([\w\s'-]+)", query, re.IGNORECASE)
         if match:
-            return match.group(1).strip(" .,!?") or None
+            return match.group(1).strip(" .,!?") or "__use_ip_location__"
 
-        stripped = query.strip()
-        return stripped if stripped else None
+        return "__use_ip_location__"
 
     def _geocode_location(self, location: str) -> Optional[tuple[float, float]]:
         """Convert a location name to latitude and longitude using Open-Meteo geocoding."""
