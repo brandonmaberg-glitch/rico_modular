@@ -1,32 +1,32 @@
-from typing import Dict, List, Type
+from typing import Dict, List
 
 from core.base_skill import BaseSkill
 
 
 class SkillRegistry:
-    """Registry for managing BaseSkill subclasses."""
+    """Registry for managing BaseSkill instances."""
 
     def __init__(self) -> None:
-        self._skills: Dict[str, Type[BaseSkill]] = {}
+        self._skills: Dict[str, BaseSkill] = {}
 
-    def register(self, skill_class: Type[BaseSkill]) -> None:
-        """Register a skill class.
+    def register(self, skill: BaseSkill) -> None:
+        """Register a skill instance.
 
         Args:
-            skill_class: A subclass of BaseSkill to register.
+            skill: An instance of BaseSkill to register.
 
         Raises:
-            TypeError: If ``skill_class`` is not a subclass of BaseSkill.
+            TypeError: If ``skill`` is not an instance of BaseSkill.
         """
-        if not issubclass(skill_class, BaseSkill):
-            raise TypeError("skill_class must be a subclass of BaseSkill")
+        if not isinstance(skill, BaseSkill):
+            raise TypeError("skill must be an instance of BaseSkill")
 
-        self._skills[skill_class.__name__] = skill_class
+        self._skills[skill.name] = skill
 
-    def get(self, name: str) -> Type[BaseSkill] | None:
-        """Retrieve a registered skill class by name."""
+    def get(self, name: str) -> BaseSkill | None:
+        """Retrieve a registered skill by name."""
         return self._skills.get(name)
 
-    def all(self) -> List[Type[BaseSkill]]:
-        """Return all registered skill classes."""
+    def all(self) -> List[BaseSkill]:
+        """Return all registered skills."""
         return list(self._skills.values())
