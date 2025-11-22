@@ -1,6 +1,8 @@
 """Placeholder for future vehicle telemetry integrations."""
 from __future__ import annotations
 
+from core.base_skill import BaseSkill
+
 
 description = (
     "Provides information about the car’s engine status, diagnostics, performance, "
@@ -16,4 +18,16 @@ def activate(_: str) -> str:
     )
 
 
-__all__ = ["activate"]
+class CarInfoSkill(BaseSkill):
+    """Skill wrapper for car information retrieval."""
+
+    name = "car_info"
+    description = description
+
+    def run(self, query: str, **kwargs) -> str:  # pylint: disable=unused-argument
+        """Execute the car info skill using existing logic."""
+
+        return activate(query)
+
+
+__all__ = ["activate", "CarInfoSkill"]

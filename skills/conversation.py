@@ -8,6 +8,7 @@ from typing import Dict, Optional
 
 from openai import OpenAI
 
+from core.base_skill import BaseSkill
 from memory.manager import MemoryManager, load_persona, load_system_prompt
 
 logger = logging.getLogger("RICO")
@@ -163,10 +164,23 @@ def activate(text: str) -> str:
         _MEMORY.consider(text)
 
 
+class ConversationSkill(BaseSkill):
+    """Skill wrapper for general conversation handling."""
+
+    name = "conversation"
+    description = description
+
+    def run(self, query: str, **kwargs) -> str:  # pylint: disable=unused-argument
+        """Execute the conversation skill using existing logic."""
+
+        return activate(query)
+
+
 __all__ = [
     "activate",
     "detect_subject",
     "detect_topic",
     "get_context_subject",
     "set_context_topic",
+    "ConversationSkill",
 ]

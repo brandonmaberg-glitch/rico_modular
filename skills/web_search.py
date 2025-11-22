@@ -16,6 +16,7 @@ from skills.conversation import (
     get_context_subject,
     set_context_topic,
 )
+from core.base_skill import BaseSkill
 from memory.manager import load_persona, load_system_prompt
 
 logger = logging.getLogger("RICO")
@@ -308,4 +309,16 @@ def run_web_search(query: str) -> str:
         return "Sorry Sir, I could not retrieve the requested web intelligence."
 
 
-__all__ = ["run_web_search"]
+class WebSearchSkill(BaseSkill):
+    """Skill wrapper for live web search capabilities."""
+
+    name = "web_search"
+    description = description
+
+    def run(self, query: str, **kwargs) -> str:  # pylint: disable=unused-argument
+        """Execute the web search skill using existing logic."""
+
+        return run_web_search(query)
+
+
+__all__ = ["run_web_search", "WebSearchSkill"]
