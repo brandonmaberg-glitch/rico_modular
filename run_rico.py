@@ -198,7 +198,7 @@ def _run_conversation_loop(
                     skill_name = select_skill(text, available_skills)
                     selected_skill = skill_registry.get(skill_name)
                     if selected_skill:
-                        response = selected_skill().run(text)
+                        response = selected_skill.run(text)
                     else:
                         logger.info(
                             "No matching skill found for '%s'; falling back to conversation.",
