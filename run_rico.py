@@ -32,7 +32,7 @@ def build_skill_registry(config: AppConfig):
     loaded_skills = SkillLoader.load_skills()
 
     for skill in loaded_skills:
-        registry.register(skill.__class__)
+        registry.register(skill)
 
     loaded_skill_names = [skill.__class__.__name__ for skill in loaded_skills]
     logger.info("Loaded skills: %s", ", ".join(loaded_skill_names) or "none")
