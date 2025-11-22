@@ -3,7 +3,9 @@ from __future__ import annotations
 
 import logging
 
+import core.skill_loader as SkillLoader
 from config.settings import AppConfig
+from core.skill_registry import SkillRegistry
 from logs.logger import setup_logger
 from router.command_router import CommandRouter
 from skills import car_info, conversation, system_status, web_search
@@ -25,6 +27,15 @@ logger = logging.getLogger("RICO")
 
 def build_skill_registry(config: AppConfig):
     """Create the mapping of skill names to callable handlers."""
+    registry = SkillRegistry()
+    loaded_skills = SkillLoader.load_skills()
+
+    for skill in loaded_skills:
+        registry.register(skill.__class__)
+
+    loaded_skill_names = [skill.__class__.__name__ for skill in loaded_skills]
+    logger.info("Loaded skills: %s", ", ".join(loaded_skill_names) or "none")
+
     return {
         "system_status": system_status.activate,
         "conversation": conversation.activate,
