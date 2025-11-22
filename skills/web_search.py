@@ -20,6 +20,11 @@ from memory.manager import load_persona, load_system_prompt
 
 logger = logging.getLogger("RICO")
 
+description = (
+    "Searches the internet to look up information, answer questions, fetch data, "
+    "and gather external knowledge for the user."
+)
+
 _client: Optional[OpenAI] = None
 _PERSONA_ID = "rico_butler_v3"
 _SYSTEM_PROMPT = load_system_prompt()
