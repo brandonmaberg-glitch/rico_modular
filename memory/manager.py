@@ -22,6 +22,47 @@ _MEMORY_PATH = _BASE_DIR / "logs" / "memory.json"
 _PERSONALITY_DIR = _BASE_DIR / "personality"
 _SYSTEM_PROMPT_PATH = _BASE_DIR / "config" / "system_prompt.txt"
 
+_IMPORTANT_TOPICS = {
+    "prefer",
+    "like",
+    "love",
+    "hate",
+    "dislike",
+    "project",
+    "working on",
+    "job",
+    "car",
+    "partner",
+    "wife",
+    "husband",
+    "team",
+    "goal",
+    "deadline",
+    "remember",
+    "from now on",
+    "always",
+    "never",
+    "birthday",
+    "anniversary",
+    "diet",
+    "allergy",
+}
+
+_SMALL_TALK = {
+    "hello",
+    "hi",
+    "hey",
+    "thanks",
+    "thank you",
+    "thank u",
+    "good morning",
+    "good evening",
+    "good night",
+    "lol",
+    "haha",
+    "hahaha",
+}
+
 
 class MemoryManager:
     """Maintain compressed long-term notes and a short summary."""
@@ -32,6 +73,38 @@ class MemoryManager:
         self._client = self._build_client()
         self._memories: List[str] = []
         self._load()
+
+    @staticmethod
+    def _is_relevant(note: str) -> bool:
+        """Return True when a memory contains durable, personal details."""
+
+        cleaned = note.strip().lower()
+        if not cleaned or len(cleaned.split()) < 4:
+            return False
+
+        if any(trigger in cleaned for trigger in _SMALL_TALK):
+            return False
+
+        return any(topic in cleaned for topic in _IMPORTANT_TOPICS)
+
+    def _prune_unhelpful(self) -> bool:
+        """Remove trivial or duplicate memories, returning True if mutated."""
+
+        filtered: List[str] = []
+        seen: set[str] = set()
+        for item in self._memories:
+            note = str(item).strip()
+            lowered = note.lower()
+            if not note or lowered in seen:
+                continue
+            if not self._is_relevant(note):
+                continue
+            seen.add(lowered)
+            filtered.append(note)
+
+        changed = filtered != self._memories
+        self._memories = filtered
+        return changed
 
     @staticmethod
     def _build_client() -> Optional[OpenAI]:
@@ -50,11 +123,18 @@ class MemoryManager:
             logger.warning("Memory file unreadable; starting fresh.")
             payload = {}
         self._memories = [str(item).strip() for item in payload.get("memories", []) if item]
+        initial_count = len(self._memories)
+        if self._prune_unhelpful():
+            logger.info("Removed %s stale memories.", initial_count - len(self._memories))
         self._memories = self._memories[-self.max_items :]
         self._trim_to_budget()
+        if len(self._memories) != initial_count:
+            self._persist()
 
     def _persist(self) -> None:
         _MEMORY_PATH.parent.mkdir(parents=True, exist_ok=True)
+        self._prune_unhelpful()
+        self._trim_to_budget()
         with _MEMORY_PATH.open("w", encoding="utf-8") as file:
             json.dump({"memories": self._memories[-self.max_items :]}, file, ensure_ascii=False, indent=2)
 
@@ -108,31 +188,7 @@ class MemoryManager:
     def _heuristic_note(text: str) -> Optional[str]:
         lowered = text.lower()
         pronouns = [" i ", " i'm", "i'm ", "i am", " my ", " our "]
-        topics = [
-            "prefer",
-            "like",
-            "love",
-            "hate",
-            "dislike",
-            "project",
-            "working on",
-            "job",
-            "car",
-            "partner",
-            "wife",
-            "husband",
-            "team",
-            "goal",
-            "deadline",
-            "remember",
-            "from now on",
-            "always",
-            "never",
-            "birthday",
-            "anniversary",
-            "diet",
-            "allergy",
-        ]
+        topics = list(_IMPORTANT_TOPICS)
 
         if not any(token in lowered for token in topics):
             return None
