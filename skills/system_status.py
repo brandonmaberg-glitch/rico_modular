@@ -6,6 +6,12 @@ import datetime
 import psutil
 
 
+description = (
+    "Reports RICO’s internal system status, performance metrics, uptime, and "
+    "subsystem health."
+)
+
+
 def activate(_: str) -> str:
     """Return CPU, RAM, and current time details."""
     cpu = psutil.cpu_percent(interval=0.5)

@@ -12,6 +12,11 @@ from memory.manager import MemoryManager, load_persona, load_system_prompt
 
 logger = logging.getLogger("RICO")
 
+description = (
+    "Handles general conversation, small talk, opinions, and friendly responses "
+    "when no specialised skill matches the user request."
+)
+
 _PERSONA_ID = "rico_butler_v3"
 _SYSTEM_PROMPT = load_system_prompt()
 _PERSONA_TEXT = load_persona(_PERSONA_ID)

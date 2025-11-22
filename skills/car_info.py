@@ -2,6 +2,12 @@
 from __future__ import annotations
 
 
+description = (
+    "Provides information about the car’s engine status, diagnostics, performance, "
+    "health checks, and sensor readings."
+)
+
+
 def activate(_: str) -> str:
     """Return a stub response describing future capabilities."""
     return (
