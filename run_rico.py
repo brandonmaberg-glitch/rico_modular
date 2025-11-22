@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 
 import core.skill_loader as SkillLoader
+from core.intent_router import select_skill
 from config.settings import AppConfig
 from core.skill_registry import SkillRegistry
 from logs.logger import setup_logger
@@ -36,12 +37,15 @@ def build_skill_registry(config: AppConfig):
     loaded_skill_names = [skill.__class__.__name__ for skill in loaded_skills]
     logger.info("Loaded skills: %s", ", ".join(loaded_skill_names) or "none")
 
-    return {
-        "system_status": system_status.activate,
-        "conversation": conversation.activate,
-        "car_info": car_info.activate,
-        "web_search": web_search.run_web_search,
-    }
+    return (
+        registry,
+        {
+            "system_status": system_status.activate,
+            "conversation": conversation.activate,
+            "car_info": car_info.activate,
+            "web_search": web_search.run_web_search,
+        },
+    )
 
 
 def main() -> None:
@@ -61,7 +65,8 @@ def main() -> None:
         elevenlabs_api_key=config.elevenlabs_api_key,
         voice_id=config.elevenlabs_voice_id,
     )
-    router = CommandRouter(build_skill_registry(config))
+    skill_registry, skills = build_skill_registry(config)
+    router = CommandRouter(skills)
 
     logger.info("RICO is online. Awaiting your command, Sir.")
 
@@ -77,6 +82,7 @@ def main() -> None:
                 tts_engine=tts_engine,
                 router=router,
                 silence_timeout=20.0,
+                skill_registry=skill_registry,
             )
         except KeyboardInterrupt:
             logger.info("Keyboard interrupt received. Exiting gracefully.")
@@ -134,6 +140,7 @@ def _run_conversation_loop(
     tts_engine: Speaker,
     router: CommandRouter,
     silence_timeout: float,
+    skill_registry: SkillRegistry | None = None,
 ) -> None:
     """Maintain an active conversation until an exit condition is met."""
 
@@ -176,7 +183,27 @@ def _run_conversation_loop(
             break
 
         send_thinking(0.85)
-        response = router.route(text)
+
+        response = None
+        if skill_registry:
+            try:
+                available_skills = [
+                    {
+                        "name": skill.name or skill.__name__,
+                        "description": getattr(skill, "description", ""),
+                    }
+                    for skill in skill_registry.all()
+                ]
+                if available_skills:
+                    skill_name = select_skill(text, available_skills)
+                    selected_skill = skill_registry.get(skill_name)
+                    if selected_skill:
+                        response = selected_skill().run(text)
+            except Exception as exc:  # pragma: no cover - defensive fallback
+                logger.exception("Skill selection or execution failed: %s", exc)
+
+        if response is None:
+            response = router.route(text)
         logger.info("Skill response: %s", response)
         send_thinking(0.0)
         send_reply(response)
