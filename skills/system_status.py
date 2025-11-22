@@ -5,6 +5,8 @@ import datetime
 
 import psutil
 
+from core.base_skill import BaseSkill
+
 
 description = (
     "Reports RICO’s internal system status, performance metrics, uptime, and "
@@ -23,4 +25,16 @@ def activate(_: str) -> str:
     )
 
 
-__all__ = ["activate"]
+class SystemStatusSkill(BaseSkill):
+    """Skill wrapper for reporting system status."""
+
+    name = "system_status"
+    description = description
+
+    def run(self, query: str, **kwargs) -> str:  # pylint: disable=unused-argument
+        """Execute the system status skill using existing logic."""
+
+        return activate(query)
+
+
+__all__ = ["activate", "SystemStatusSkill"]
