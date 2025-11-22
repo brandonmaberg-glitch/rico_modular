@@ -52,7 +52,18 @@ class WeatherSkill(BaseSkill):
 
         try:
             location = self._extract_location(query) or "Benfleet"
-            coords = self._geocode_location(location)
+            coords = None
+            if location == "__use_ip_location__":
+                ip_location = self._lookup_ip_location()
+                if ip_location:
+                    city, lat, lon = ip_location
+                    coords = (lat, lon)
+                    location = city or "your location"
+                else:
+                    coords = (51.561, 0.559)
+                    location = "Benfleet"
+            else:
+                coords = self._geocode_location(location)
             if not coords:
                 return "Sorry, I couldn't find that location. Please try another place."
 
@@ -74,6 +85,19 @@ class WeatherSkill(BaseSkill):
         for keyword in ("benfleet", "south benfleet", "ss7"):
             if keyword in lowered:
                 return "Benfleet"
+
+        for phrase in (
+            "here",
+            "where i am",
+            "my location",
+            "outside",
+            "right now",
+            "near me",
+            "around me",
+            "at my place",
+        ):
+            if phrase in lowered:
+                return "__use_ip_location__"
 
         match = re.search(r"\b(?:in|for|at)\s+([\w\s'-]+)", query, re.IGNORECASE)
         if match:
@@ -107,6 +131,23 @@ class WeatherSkill(BaseSkill):
                 return None
 
             return float(lat), float(lon)
+        except Exception:
+            return None
+
+    def _lookup_ip_location(self) -> Optional[tuple[Optional[str], float, float]]:
+        """Lookup approximate location based on caller IP address."""
+
+        try:
+            response = requests.get("https://ipapi.co/json/", timeout=10)
+            response.raise_for_status()
+            data = response.json() or {}
+            city = data.get("city")
+            lat = data.get("latitude")
+            lon = data.get("longitude")
+            if lat is None or lon is None:
+                return None
+
+            return city, float(lat), float(lon)
         except Exception:
             return None
 
