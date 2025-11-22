@@ -199,6 +199,12 @@ def _run_conversation_loop(
                     selected_skill = skill_registry.get(skill_name)
                     if selected_skill:
                         response = selected_skill().run(text)
+                    else:
+                        logger.info(
+                            "No matching skill found for '%s'; falling back to conversation.",
+                            skill_name,
+                        )
+                        response = router.skills.get("conversation", router.route)(text)
             except Exception as exc:  # pragma: no cover - defensive fallback
                 logger.exception("Skill selection or execution failed: %s", exc)
 
