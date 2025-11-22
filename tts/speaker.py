@@ -145,7 +145,7 @@ class Speaker:
         try:
             with self._openai_client.audio.speech.with_streaming_response.create(
                 model="gpt-4o-mini-tts",
-                voice="alloy",
+                voice="ash",
                 input=text,
                 response_format="wav",
             ) as response:
