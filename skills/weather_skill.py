@@ -70,6 +70,11 @@ class WeatherSkill(BaseSkill):
         if not query:
             return None
 
+        lowered = query.lower()
+        for keyword in ("benfleet", "south benfleet", "ss7"):
+            if keyword in lowered:
+                return "Benfleet"
+
         match = re.search(r"\b(?:in|for|at)\s+([\w\s'-]+)", query, re.IGNORECASE)
         if match:
             return match.group(1).strip(" .,!?") or None
@@ -81,6 +86,9 @@ class WeatherSkill(BaseSkill):
         """Convert a location name to latitude and longitude using Open-Meteo geocoding."""
 
         try:
+            if location.lower() in ["benfleet", "south benfleet", "ss7"]:
+                return 51.561, 0.559
+
             url = (
                 "https://geocoding-api.open-meteo.com/v1/search?name="
                 f"{quote_plus(location)}&count=1"
