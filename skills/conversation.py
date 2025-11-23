@@ -1,16 +1,13 @@
 """Conversation skill focused on brevity and personality."""
 from __future__ import annotations
 
-import json
 import logging
-import os
 import re
 from typing import Dict, Optional
 
-from openai import OpenAI
-
 from core.base_skill import BaseSkill
 from utils.prompts import load_persona, load_system_prompt
+from run_rico import _conversation_with_memory
 
 logger = logging.getLogger("RICO")
 
@@ -22,9 +19,6 @@ description = (
 _PERSONA_ID = "rico_butler_v3"
 _SYSTEM_PROMPT = load_system_prompt()
 _PERSONA_TEXT = load_persona(_PERSONA_ID)
-_api_key = os.getenv("OPENAI_API_KEY")
-_client: Optional[OpenAI] = OpenAI(api_key=_api_key) if _api_key else None
-
 _CONTEXT: Dict[str, Optional[str]] = {
     "last_subject": None,
     "last_subject_type": None,
@@ -109,73 +103,8 @@ def _build_context_message() -> Optional[dict]:
     return {"role": "system", "content": f"Context: The user is referring to {subject}."}
 
 
-def _select_model(text: str) -> str:
-    """Choose a lightweight model unless the request is complex."""
-
-    lower = text.lower()
-    heavy_signals = ["explain", "detailed", "why", "how", "analysis", "compare"]
-    if len(text) > 260 or any(token in lower for token in heavy_signals):
-        return "gpt-4.1"
-    return "gpt-4.1-mini"
-
-
 def activate(text: str) -> str:
-    """Generate a response using minimal context."""
-
-    if not _client:
-        return "Terribly sorry Sir, my conversational faculties are offline just now."
-
-    system_content = f"{_SYSTEM_PROMPT}\npersona:{_PERSONA_ID}"
-    persona_content = _PERSONA_TEXT
-
-    subject, subject_type = detect_subject(text)
-    if subject:
-        set_context_topic(subject, subject_type)
-    context_message = _build_context_message() if _needs_context(text) else None
-
-    try:
-        messages = [
-            {"role": "system", "content": system_content},
-            {"role": "system", "content": persona_content},
-        ]
-        if context_message:
-            messages.append(context_message)
-        messages.append({"role": "user", "content": text})
-
-        completion = _client.chat.completions.create(
-            model=_select_model(text),
-            messages=messages,
-            response_format={
-                "type": "json_schema",
-                "json_schema": {
-                    "name": "rico_conversation_response",
-                    "schema": {
-                        "type": "object",
-                        "properties": {
-                            "reply": {"type": "string"},
-                            "memory_to_write": {"type": ["string", "null"]},
-                            "should_write_memory": {"type": ["string", "null"]},
-                        },
-                        "required": ["reply"],
-                    },
-                },
-            },
-            temperature=0.4,
-        )
-
-        content = completion.choices[0].message.content if completion.choices else None
-        if not content:
-            raise ValueError("No content returned from OpenAI response.")
-
-        parsed = json.loads(content)
-
-        if not parsed:
-            raise ValueError("No parsed content returned from OpenAI response.")
-
-        return parsed
-    except Exception as exc:  # pragma: no cover - defensive
-        logger.error("Conversation skill failed: %s", exc)
-        return "My apologies Sir, my thoughts are momentarily elsewhere."
+    return _conversation_with_memory(text)
 
 
 class ConversationSkill(BaseSkill):
@@ -187,7 +116,7 @@ class ConversationSkill(BaseSkill):
     def run(self, query: str, **kwargs) -> str:  # pylint: disable=unused-argument
         """Execute the conversation skill using existing logic."""
 
-        return activate(query)
+        return _conversation_with_memory(query)
 
 
 __all__ = [
