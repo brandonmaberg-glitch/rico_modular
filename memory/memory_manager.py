@@ -34,16 +34,127 @@ def generate_embedding(text: str) -> bytes:
     return embedding_array.tobytes()
 
 
+def clean_memory(text: str) -> str | None:
+    """Validate and normalize memory text, rejecting unsuitable entries."""
+
+    if not text:
+        return None
+
+    cleaned = text.strip()
+    if len(cleaned) < 10:
+        return None
+
+    lower_text = cleaned.lower()
+
+    question_starters = (
+        "what",
+        "who",
+        "how",
+        "when",
+        "why",
+        "is",
+        "does",
+        "do",
+        "are",
+        "can",
+        "should",
+    )
+    if "?" in cleaned or any(
+        lower_text.startswith(word + " ") or lower_text == word for word in question_starters
+    ):
+        return None
+
+    pronouns = {"he", "she", "they", "him", "her", "them", "that", "this"}
+    tokens = {token.strip(".,!?") for token in lower_text.split()}
+    if pronouns.intersection(tokens):
+        return None
+
+    filler_phrases = {"lol", "that's funny", "thats funny", "okay", "ok", "sure"}
+    if lower_text in filler_phrases:
+        return None
+
+    verbs = {
+        "is",
+        "has",
+        "likes",
+        "prefers",
+        "owns",
+        "lives",
+        "drives",
+        "always",
+        "typically",
+        "usually",
+    }
+    if not verbs.intersection(tokens) and not any(verb in lower_text for verb in verbs):
+        return None
+
+    return cleaned
+
+
+def should_save_memory(text: str) -> str:
+    """Return whether a memory should be saved, rejected, or confirmed."""
+
+    cleaned = clean_memory(text)
+    if cleaned is None:
+        return "no"
+
+    lower_text = cleaned.lower()
+
+    preference_keywords = {"likes", "prefers", "loves", "enjoys"}
+    car_keywords = {"car", "vehicle", "engine", "tesla", "bmw", "drive", "drives"}
+    location_keywords = {"from", "live", "lives", "born", "origin"}
+    system_keywords = {"setting", "settings", "configuration", "config", "system"}
+    behavior_keywords = {"always", "usually", "typically", "every day", "routine", "habit"}
+
+    if any(keyword in lower_text for keyword in preference_keywords):
+        return "yes"
+    if any(keyword in lower_text for keyword in car_keywords):
+        return "yes"
+    if any(keyword in lower_text for keyword in location_keywords):
+        return "yes"
+    if any(keyword in lower_text for keyword in system_keywords):
+        return "yes"
+    if any(keyword in lower_text for keyword in behavior_keywords):
+        return "yes"
+
+    return "ask"
+
+
+def estimate_importance(text: str) -> float:
+    """Estimate the importance of a memory based on its content."""
+
+    lower_text = text.lower()
+
+    if any(keyword in lower_text for keyword in {"likes", "prefers", "loves", "enjoys"}):
+        return 0.8
+    if any(keyword in lower_text for keyword in {"car", "vehicle", "engine", "drive", "drives"}):
+        return 0.9
+    if any(keyword in lower_text for keyword in {"from", "live", "born", "origin"}):
+        return 0.7
+    if any(keyword in lower_text for keyword in {"setting", "settings", "configuration", "system"}):
+        return 0.8
+    if any(keyword in lower_text for keyword in {"always", "usually", "typically", "routine", "habit"}):
+        return 0.6
+
+    return 0.5
+
+
 def save_long_term_memory(
     text: str,
     category: str,
-    importance: float = 0.5,
+    importance: float | None = None,
     embedding: bytes | None = None,
-) -> int:
+) -> int | None:
     """Insert a new long-term memory and return its ID."""
+    cleaned_text = clean_memory(text)
+    if cleaned_text is None:
+        return None
+
     timestamp = get_current_timestamp()
     if embedding is None:
-        embedding = generate_embedding(text)
+        embedding = generate_embedding(cleaned_text)
+    if importance is None:
+        importance = estimate_importance(cleaned_text)
     with connect() as conn:
         cursor = conn.cursor()
         cursor.execute(
@@ -51,7 +162,7 @@ def save_long_term_memory(
             INSERT INTO long_term_memory (text, category, importance, last_updated, embedding)
             VALUES (?, ?, ?, ?, ?)
             """,
-            (text, category, importance, timestamp, embedding),
+            (cleaned_text, category, importance, timestamp, embedding),
         )
         conn.commit()
         return cursor.lastrowid
