@@ -10,6 +10,7 @@ from core.skill_registry import SkillRegistry
 from logs.logger import setup_logger
 from memory.memory_manager import (
     get_context,
+    get_relevant_memories,
     periodic_memory_maintenance,
     process_memory_suggestion,
     set_context,
@@ -32,6 +33,56 @@ from wakeword.engine import WakeWordEngine
 logger = logging.getLogger("RICO")
 
 
+def _conversation_with_memory(text: str) -> str:
+    """Inject relevant memories into the conversation system prompt."""
+
+    relevant_memories = get_relevant_memories(text, top_k=5)
+    memory_text = "\n".join([memory["text"] for memory in relevant_memories])
+    memory_context = f"Relevant memories:\n{memory_text}\n\n"
+
+    if not conversation._client:
+        return "Terribly sorry Sir, my conversational faculties are offline just now."
+
+    system_personality_prompt = (
+        f"{conversation._SYSTEM_PROMPT}\npersona:{conversation._PERSONA_ID}"
+    )
+    persona_content = conversation._PERSONA_TEXT
+
+    subject, subject_type = conversation.detect_subject(text)
+    if subject:
+        conversation.set_context_topic(subject, subject_type)
+    context_message = (
+        conversation._build_context_message()
+        if conversation._needs_context(text)
+        else None
+    )
+
+    try:
+        messages = [
+            {
+                "role": "system",
+                "content": memory_context + system_personality_prompt,
+            },
+            {"role": "system", "content": persona_content},
+        ]
+        if context_message:
+            messages.append(context_message)
+        messages.append({"role": "user", "content": text})
+
+        completion = conversation._client.chat.completions.create(
+            model=conversation._select_model(text),
+            messages=messages,
+            temperature=0.4,
+        )
+        choice = completion.choices[0].message.content if completion.choices else None
+        if not choice:
+            raise ValueError("No content returned from OpenAI response.")
+        return choice.strip()
+    except Exception as exc:  # pragma: no cover - defensive
+        conversation.logger.error("Conversation skill failed: %s", exc)
+        return "My apologies Sir, my thoughts are momentarily elsewhere."
+
+
 def build_skill_registry(config: AppConfig):
     """Create the mapping of skill names to callable handlers."""
     registry = SkillRegistry()
@@ -47,7 +98,7 @@ def build_skill_registry(config: AppConfig):
         registry,
         {
             "system_status": system_status.activate,
-            "conversation": conversation.activate,
+            "conversation": _conversation_with_memory,
             "car_info": car_info.activate,
             "web_search": web_search.run_web_search,
         },
