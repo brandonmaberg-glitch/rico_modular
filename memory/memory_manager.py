@@ -304,6 +304,60 @@ def embedding_from_blob(blob: bytes) -> np.ndarray:
     return np.frombuffer(blob, dtype=np.float32)
 
 
+def decay_memories() -> None:
+    """Gradually lower memory importance based on time since last update."""
+
+    now = datetime.utcnow()
+    memories = get_long_term_memories()
+
+    for memory_id, _text, _category, importance, last_updated, _embedding in memories:
+        try:
+            last_updated_dt = (
+                datetime.fromisoformat(last_updated.replace("Z", ""))
+                if last_updated
+                else now
+            )
+        except ValueError:
+            last_updated_dt = now
+
+        elapsed_days = (now - last_updated_dt).total_seconds() / 86400
+        new_importance = max(0.0, importance - 0.01 * elapsed_days)
+
+        update_long_term_importance(memory_id, new_importance)
+
+
+def refresh_memory(memory_id: int) -> None:
+    """Increase importance for a recently accessed memory."""
+
+    with connect() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT importance FROM long_term_memory WHERE id = ?",
+            (memory_id,),
+        )
+        row = cursor.fetchone()
+
+        if row is None:
+            return
+
+        current_importance = row[0]
+        new_importance = min(1.0, current_importance + 0.05)
+
+        update_long_term_importance(memory_id, new_importance)
+
+
+def prune_low_importance(threshold: float = 0.15) -> None:
+    """Remove memories that fall below the importance threshold."""
+
+    with connect() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "DELETE FROM long_term_memory WHERE importance < ?",
+            (threshold,),
+        )
+        conn.commit()
+
+
 def get_relevant_memories(query: str, top_k: int = 5) -> list[dict[str, Any]]:
     """Return the most relevant long-term memories for a query using embeddings."""
     query_embedding_array = embedding_from_blob(generate_embedding(query))
@@ -338,7 +392,12 @@ def get_relevant_memories(query: str, top_k: int = 5) -> list[dict[str, Any]]:
             )
 
     memories.sort(key=lambda item: item["similarity"], reverse=True)
-    return memories[:top_k]
+    top_memories = memories[:top_k]
+
+    for memory in top_memories:
+        refresh_memory(memory["id"])
+
+    return top_memories
 
 
 def set_short_term(key: str, value: str, ttl_seconds: int = 300) -> None:
@@ -445,3 +504,10 @@ def get_skill_memory(skill: str, key: str) -> tuple[Any, ...] | None:
             (skill, key),
         )
         return cursor.fetchone()
+
+
+def periodic_memory_maintenance():
+    """Hook to run periodic memory housekeeping tasks."""
+
+    decay_memories()
+    prune_low_importance()
