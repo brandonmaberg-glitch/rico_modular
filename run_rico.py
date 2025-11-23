@@ -59,17 +59,6 @@ def _conversation_with_memory(text: str) -> str:
     )
 
     try:
-        messages = [
-            {
-                "role": "system",
-                "content": memory_context + system_personality_prompt,
-            },
-            {"role": "system", "content": persona_content},
-        ]
-        if context_message:
-            messages.append(context_message)
-        messages.append({"role": "user", "content": text})
-
         response = conversation._client.responses.create(
             model=conversation._select_model(text),
             input=[
@@ -96,18 +85,57 @@ def _conversation_with_memory(text: str) -> str:
                         }
                     ]
                 },
-                *[
-                    {
-                        "role": msg["role"],
-                        "content": [
-                            {
-                                "type": "text",
-                                "text": msg["content"]
-                            }
-                        ]
-                    }
-                    for msg in messages
-                ]
+                {
+                    "role": "system",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": memory_context
+                        }
+                    ]
+                },
+                {
+                    "role": "system",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": system_personality_prompt
+                        }
+                    ]
+                },
+                {
+                    "role": "system",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": persona_content
+                        }
+                    ]
+                },
+                *(
+                    [
+                        {
+                            "role": context_message["role"],
+                            "content": [
+                                {
+                                    "type": "text",
+                                    "text": context_message["content"]
+                                }
+                            ]
+                        }
+                    ]
+                    if context_message
+                    else []
+                ),
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": text
+                        }
+                    ]
+                }
             ],
             temperature=0.4,
         )
