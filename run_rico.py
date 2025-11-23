@@ -79,7 +79,6 @@ def _conversation_with_memory(text: str) -> str:
                 }
                 for message in messages
             ],
-            temperature=0.4,
             response_format={
                 "type": "json_schema",
                 "json_schema": {
@@ -95,9 +94,10 @@ def _conversation_with_memory(text: str) -> str:
                     },
                 },
             },
+            temperature=0.4,
         )
         try:
-            parsed = response.output[0].content[0].parsed  # type: ignore[index]
+            parsed = response.output[0].parsed  # type: ignore[index]
         except Exception:
             parsed_text = response.output_text or ""
             parsed = json.loads(parsed_text) if parsed_text else None
