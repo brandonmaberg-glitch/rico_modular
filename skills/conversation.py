@@ -1,6 +1,7 @@
 """Conversation skill focused on brevity and personality."""
 from __future__ import annotations
 
+import json
 import logging
 import os
 import re
@@ -141,15 +142,43 @@ def activate(text: str) -> str:
             messages.append(context_message)
         messages.append({"role": "user", "content": text})
 
-        completion = _client.chat.completions.create(
+        response = _client.responses.create(
             model=_select_model(text),
-            messages=messages,
+            input=[
+                {
+                    "role": message["role"],
+                    "content": [{"type": "text", "text": message["content"]}],
+                }
+                for message in messages
+            ],
             temperature=0.4,
+            response_format={
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "rico_conversation_response",
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "reply": {"type": "string"},
+                            "memory_to_write": {"type": ["string", "null"]},
+                            "should_write_memory": {"type": ["string", "null"]},
+                        },
+                        "required": ["reply"],
+                    },
+                },
+            },
         )
-        choice = completion.choices[0].message.content if completion.choices else None
-        if not choice:
-            raise ValueError("No content returned from OpenAI response.")
-        return choice.strip()
+
+        try:
+            parsed = response.output[0].content[0].parsed  # type: ignore[index]
+        except Exception:
+            parsed_text = response.output_text or ""
+            parsed = json.loads(parsed_text) if parsed_text else None
+
+        if not parsed:
+            raise ValueError("No parsed content returned from OpenAI response.")
+
+        return parsed
     except Exception as exc:  # pragma: no cover - defensive
         logger.error("Conversation skill failed: %s", exc)
         return "My apologies Sir, my thoughts are momentarily elsewhere."
