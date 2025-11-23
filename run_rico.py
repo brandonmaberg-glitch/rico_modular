@@ -34,9 +34,13 @@ from wakeword.engine import WakeWordEngine
 logger = logging.getLogger("RICO")
 
 
-def _conversation_with_memory(text: str) -> str:
-    """Inject relevant memories into the conversation system prompt."""
+def _conversation_with_memory(text: str) -> dict:
+    """
+    Generate a conversation response using the OpenAI Responses API with JSON schema,
+    memory injection, persona, and system prompt.
+    """
 
+    # Retrieve relevant memories
     relevant_memories = get_relevant_memories(text, top_k=5)
 
     if relevant_memories:
@@ -52,14 +56,17 @@ def _conversation_with_memory(text: str) -> str:
     else:
         memory_context = "No stored memories are available for this query.\n\n"
 
+    # Safety check
     if not conversation._client:
-        return "Terribly sorry Sir, my conversational faculties are offline just now."
+        return {"reply": "Terribly sorry Sir, my conversational faculties appear to be offline."}
 
+    # Build system prompt and persona
     system_personality_prompt = (
         f"{conversation._SYSTEM_PROMPT}\npersona:{conversation._PERSONA_ID}"
     )
     persona_content = conversation._PERSONA_TEXT
 
+    # Determine contextual subject
     subject, subject_type = conversation.detect_subject(text)
     if subject:
         conversation.set_context_topic(subject, subject_type)
@@ -69,49 +76,100 @@ def _conversation_with_memory(text: str) -> str:
         else None
     )
 
-    try:
-        messages = [
-            {"role": "system", "content": system_personality_prompt},
-            {"role": "system", "content": memory_context},
-            {"role": "system", "content": persona_content},
-        ]
-        if context_message:
-            messages.append(context_message)
-        messages.append({"role": "user", "content": text})
-
-        completion = conversation._client.chat.completions.create(
-            model=conversation._select_model(text),
-            messages=messages,
-            response_format={
-                "type": "json_schema",
-                "json_schema": {
-                    "name": "rico_conversation_response",
-                    "schema": {
-                        "type": "object",
-                        "properties": {
-                            "reply": {"type": "string"},
-                            "memory_to_write": {"type": ["string", "null"]},
-                            "should_write_memory": {"type": ["string", "null"]},
+    # Build the Responses API input list
+    input_blocks = [
+        # JSON schema specification
+        {
+            "role": "system",
+            "content": [
+                {
+                    "type": "response_format",
+                    "format": {
+                        "type": "json_schema",
+                        "json_schema": {
+                            "name": "rico_conversation_response",
+                            "schema": {
+                                "type": "object",
+                                "properties": {
+                                    "reply": {"type": "string"},
+                                    "memory_to_write": {"type": ["string", "null"]},
+                                    "should_write_memory": {"type": ["string", "null"]},
+                                },
+                                "required": ["reply"],
+                            },
                         },
-                        "required": ["reply"],
                     },
-                },
-            },
+                }
+            ],
+        },
+
+        # System personality prompt (NO memory inside)
+        {
+            "role": "system",
+            "content": [
+                {"type": "text", "text": system_personality_prompt}
+            ],
+        },
+
+        # Persona description
+        {
+            "role": "system",
+            "content": [
+                {"type": "text", "text": persona_content}
+            ],
+        },
+
+        # Memory context (separate block so it is NOT ignored)
+        {
+            "role": "system",
+            "content": [
+                {"type": "text", "text": memory_context}
+            ],
+        },
+    ]
+
+    # Optional context injection
+    if context_message:
+        input_blocks.append(
+            {
+                "role": context_message["role"],
+                "content": [
+                    {"type": "text", "text": context_message["content"]}
+                ],
+            }
+        )
+
+    # Final user message
+    input_blocks.append(
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": text}
+            ],
+        }
+    )
+
+    # Call Responses API
+    try:
+        completion = conversation._client.responses.create(
+            model=conversation._select_model(text),
+            input=input_blocks,
             temperature=0.4,
         )
 
-        content = completion.choices[0].message.content if completion.choices else None
-        if not content:
-            raise ValueError("No content returned from OpenAI response.")
-
-        parsed = json.loads(content)
+        parsed = completion.output[0].parsed
         if not parsed:
-            raise ValueError("No parsed content returned from OpenAI response.")
+            raise ValueError("No parsed JSON received from Responses API.")
 
         return parsed
-    except Exception as exc:  # pragma: no cover - defensive
+
+    except Exception as exc:
         conversation.logger.error("Conversation skill failed: %s", exc)
-        return "My apologies Sir, my thoughts are momentarily elsewhere."
+        return {
+            "reply": "My apologies Sir, my thoughts are momentarily elsewhere.",
+            "memory_to_write": None,
+            "should_write_memory": None,
+        }
 
 
 def build_skill_registry(config: AppConfig):
