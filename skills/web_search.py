@@ -17,7 +17,7 @@ from skills.conversation import (
     set_context_topic,
 )
 from core.base_skill import BaseSkill
-from memory.manager import load_persona, load_system_prompt
+from utils.prompts import load_persona, load_system_prompt
 
 logger = logging.getLogger("RICO")
 

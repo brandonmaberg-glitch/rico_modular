@@ -9,7 +9,7 @@ from typing import Dict, Optional
 from openai import OpenAI
 
 from core.base_skill import BaseSkill
-from memory.manager import MemoryManager, load_persona, load_system_prompt
+from utils.prompts import load_persona, load_system_prompt
 
 logger = logging.getLogger("RICO")
 
@@ -21,8 +21,6 @@ description = (
 _PERSONA_ID = "rico_butler_v3"
 _SYSTEM_PROMPT = load_system_prompt()
 _PERSONA_TEXT = load_persona(_PERSONA_ID)
-_MEMORY = MemoryManager()
-
 _api_key = os.getenv("OPENAI_API_KEY")
 _client: Optional[OpenAI] = OpenAI(api_key=_api_key) if _api_key else None
 
@@ -124,14 +122,10 @@ def activate(text: str) -> str:
     """Generate a response using minimal context."""
 
     if not _client:
-        _MEMORY.consider(text)
         return "Terribly sorry Sir, my conversational faculties are offline just now."
 
-    memory_summary = _MEMORY.load_short_summary()
     system_content = f"{_SYSTEM_PROMPT}\npersona:{_PERSONA_ID}"
     persona_content = _PERSONA_TEXT
-
-    memory_block = f"short_memory:{memory_summary}" if memory_summary else "short_memory:"
 
     subject, subject_type = detect_subject(text)
     if subject:
@@ -142,7 +136,6 @@ def activate(text: str) -> str:
         messages = [
             {"role": "system", "content": system_content},
             {"role": "system", "content": persona_content},
-            {"role": "system", "content": memory_block},
         ]
         if context_message:
             messages.append(context_message)
@@ -160,8 +153,6 @@ def activate(text: str) -> str:
     except Exception as exc:  # pragma: no cover - defensive
         logger.error("Conversation skill failed: %s", exc)
         return "My apologies Sir, my thoughts are momentarily elsewhere."
-    finally:
-        _MEMORY.consider(text)
 
 
 class ConversationSkill(BaseSkill):
