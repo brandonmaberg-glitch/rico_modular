@@ -56,7 +56,7 @@ def _conversation_with_memory(text: str) -> str:
         return "Terribly sorry Sir, my conversational faculties are offline just now."
 
     system_personality_prompt = (
-        f"{conversation._SYSTEM_PROMPT}\npersona:{conversation._PERSONA_ID}"
+        f"{conversation._SYSTEM_PROMPT}\npersona:{conversation._PERSONA_ID}\n\n{memory_context}"
     )
     persona_content = conversation._PERSONA_TEXT
 
@@ -93,15 +93,6 @@ def _conversation_with_memory(text: str) -> str:
                                     }
                                 }
                             }
-                        }
-                    ]
-                },
-                {
-                    "role": "system",
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": memory_context
                         }
                     ]
                 },
