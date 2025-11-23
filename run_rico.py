@@ -101,6 +101,15 @@ def _conversation_with_memory(text: str) -> str:
                     "content": [
                         {
                             "type": "text",
+                            "text": memory_context
+                        }
+                    ]
+                },
+                {
+                    "role": "system",
+                    "content": [
+                        {
+                            "type": "text",
                             "text": system_personality_prompt
                         }
                     ]
