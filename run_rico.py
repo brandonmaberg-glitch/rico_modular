@@ -380,6 +380,11 @@ def _run_conversation_loop(
         if isinstance(response, dict):
             suggested_memory = response.get("memory_to_write")
             should_write_memory = response.get("should_write_memory")
+            # Normalise boolean-like values for memory decisions
+            if should_write_memory in ("true", True, "True", "YES", "Yes"):
+                should_write_memory = "yes"
+            if should_write_memory in ("false", False, "False", "NO", "No"):
+                should_write_memory = "no"
             memory_result = process_memory_suggestion(
                 {
                     "should_write_memory": should_write_memory,
