@@ -3,10 +3,14 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+import re
+from typing import Optional
 
+import conversation
 import core.skill_loader as SkillLoader
-from core.intent_router import select_skill
 from config.settings import AppConfig
+from core.intent_router import select_skill
 from core.skill_registry import SkillRegistry
 from logs.logger import setup_logger
 from memory.memory_manager import (
@@ -17,7 +21,7 @@ from memory.memory_manager import (
     set_context,
 )
 from router.command_router import CommandRouter
-from skills import car_info, conversation, system_status, web_search
+from skills import car_info, system_status, web_search
 from stt.base import SpeechToTextEngine, TranscriptionResult
 from tts.speaker import Speaker
 from ui_bridge import (
@@ -179,6 +183,16 @@ def build_skill_registry(config: AppConfig):
 
     for skill in loaded_skills:
         registry.register(skill)
+
+    from skills.conversation import ConversationSkill
+
+    conversation_skill = ConversationSkill(
+        name="ConversationSkill",
+        description="Handles general conversation",
+        handler=_conversation_with_memory,
+    )
+
+    registry.register(conversation_skill)
 
     loaded_skill_names = [skill.__class__.__name__ for skill in loaded_skills]
     logger.info("Loaded skills: %s", ", ".join(loaded_skill_names) or "none")

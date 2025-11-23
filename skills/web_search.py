@@ -11,11 +11,7 @@ from openai import OpenAI
 from openai.types.responses import WebSearchToolParam
 from ui_bridge import send_image_results, send_web_preview
 
-from skills.conversation import (
-    detect_subject,
-    get_context_subject,
-    set_context_topic,
-)
+from conversation import detect_subject, get_context_subject, set_context_topic
 from core.base_skill import BaseSkill
 from utils.prompts import load_persona, load_system_prompt
 
