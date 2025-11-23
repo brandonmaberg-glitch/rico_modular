@@ -91,6 +91,74 @@ def clean_memory(text: str) -> str | None:
     return cleaned
 
 
+def categorise_memory(text: str) -> str:
+    """Return a category for the given memory text using rule-based detection."""
+
+    lower_text = text.lower()
+
+    user_profile_patterns = (
+        "my name is",
+        "i live in",
+        "i am from",
+        "my partner is",
+        "i was born",
+        "i work at",
+    )
+    if "years old" in lower_text or any(pattern in lower_text for pattern in user_profile_patterns):
+        return "user_profile"
+
+    user_preferences_patterns = (
+        "i like",
+        "i love",
+        "i prefer",
+        "my favourite",
+        "i enjoy",
+        "my preferred",
+    )
+    if any(pattern in lower_text for pattern in user_preferences_patterns):
+        return "user_preferences"
+
+    car_data_patterns = (
+        "boost",
+        "horsepower",
+        "engine",
+        "ecu",
+        "tyres",
+        "skyline",
+        "gtst",
+        "r33",
+        "oil",
+        "diagnostic",
+    )
+    if any(pattern in lower_text for pattern in car_data_patterns):
+        return "car_data"
+
+    system_settings_patterns = (
+        "call me",
+        "address me as",
+        "default location",
+        "default weather",
+        "default skill",
+        "set mode to",
+    )
+    if (
+        any(pattern in lower_text for pattern in system_settings_patterns)
+        or ("use" in lower_text and "voice" in lower_text)
+    ):
+        return "system_settings"
+
+    patterns_patterns = (
+        "i usually",
+        "i tend to",
+        "i always",
+        "i often",
+    )
+    if any(pattern in lower_text for pattern in patterns_patterns):
+        return "patterns"
+
+    return "general"
+
+
 def should_save_memory(text: str) -> str:
     """Return whether a memory should be saved, rejected, or confirmed."""
 
@@ -150,6 +218,7 @@ def save_long_term_memory(
     if cleaned_text is None:
         return None
 
+    category = categorise_memory(cleaned_text)
     timestamp = get_current_timestamp()
     if embedding is None:
         embedding = generate_embedding(cleaned_text)
