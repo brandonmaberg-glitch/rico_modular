@@ -165,8 +165,22 @@ def _conversation_with_memory(text: str) -> dict:
             args = tool_call.function.arguments
             return json.loads(args)
 
-        # Fallback: plain text
-        return {"reply": output.text, "memory_to_write": None, "should_write_memory": None}
+        # Fallback: assistant text-only output (new Responses API structure)
+        if hasattr(output, "content") and output.content:
+            first = output.content[0]
+            if hasattr(first, "text"):
+                return {
+                    "reply": first.text,
+                    "memory_to_write": None,
+                    "should_write_memory": None
+                }
+
+        # Final failsafe
+        return {
+            "reply": "My apologies Sir, I was unable to interpret the model's response.",
+            "memory_to_write": None,
+            "should_write_memory": None
+        }
 
     except Exception as exc:
         conversation.logger.error("Conversation failed: %s", exc)
