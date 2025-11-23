@@ -8,7 +8,12 @@ from core.intent_router import select_skill
 from config.settings import AppConfig
 from core.skill_registry import SkillRegistry
 from logs.logger import setup_logger
-from memory.memory_manager import get_context, process_memory_suggestion, set_context
+from memory.memory_manager import (
+    get_context,
+    periodic_memory_maintenance,
+    process_memory_suggestion,
+    set_context,
+)
 from router.command_router import CommandRouter
 from skills import car_info, conversation, system_status, web_search
 from stt.base import SpeechToTextEngine, TranscriptionResult
@@ -179,6 +184,7 @@ def _run_conversation_loop(
 ) -> None:
     """Maintain an active conversation until an exit condition is met."""
 
+    interaction_count = 0
     while True:
         send_listening(True)
         transcription = stt_engine.transcribe(timeout=silence_timeout)
@@ -187,6 +193,7 @@ def _run_conversation_loop(
         else:  # pragma: no cover - defensive for legacy return
             result = TranscriptionResult(text=str(transcription), timed_out=False)
 
+        interaction_count += 1
         if result.timed_out:
             logger.info(
                 "Silence timeout reached after %.0f seconds; exiting conversation mode.",
@@ -275,6 +282,10 @@ def _run_conversation_loop(
 
         if response is None:
             response = router.route(text)
+
+        if interaction_count % 10 == 0:
+            periodic_memory_maintenance()
+            logger.info("Memory maintenance executed.")
         suggested_memory = None
         should_write_memory = None
         memory_result = None
