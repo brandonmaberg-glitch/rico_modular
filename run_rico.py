@@ -73,11 +73,25 @@ def _conversation_with_memory(text: str) -> str:
             model=conversation._select_model(text),
             messages=messages,
             temperature=0.4,
+            response_format={
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "rico_conversation_response",
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "reply": { "type": "string" },
+                            "memory_to_write": { "type": ["string", "null"] },
+                            "should_write_memory": { "type": ["string", "null"] }
+                        },
+                        "required": ["reply"]
+                    }
+                }
+            }
         )
-        choice = completion.choices[0].message.content if completion.choices else None
-        if not choice:
-            raise ValueError("No content returned from OpenAI response.")
-        return choice.strip()
+        # Use parsed JSON, not raw text
+        choice = completion.choices[0].message.parsed
+        return choice
     except Exception as exc:  # pragma: no cover - defensive
         conversation.logger.error("Conversation skill failed: %s", exc)
         return "My apologies Sir, my thoughts are momentarily elsewhere."
