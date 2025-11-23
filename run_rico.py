@@ -1,6 +1,7 @@
 """Runtime entry point for the RICO assistant."""
 from __future__ import annotations
 
+import json
 import logging
 
 import core.skill_loader as SkillLoader
@@ -69,9 +70,15 @@ def _conversation_with_memory(text: str) -> str:
             messages.append(context_message)
         messages.append({"role": "user", "content": text})
 
-        completion = conversation._client.chat.completions.create(
+        response = conversation._client.responses.create(
             model=conversation._select_model(text),
-            messages=messages,
+            input=[
+                {
+                    "role": message["role"],
+                    "content": [{"type": "text", "text": message["content"]}],
+                }
+                for message in messages
+            ],
             temperature=0.4,
             response_format={
                 "type": "json_schema",
@@ -80,18 +87,25 @@ def _conversation_with_memory(text: str) -> str:
                     "schema": {
                         "type": "object",
                         "properties": {
-                            "reply": { "type": "string" },
-                            "memory_to_write": { "type": ["string", "null"] },
-                            "should_write_memory": { "type": ["string", "null"] }
+                            "reply": {"type": "string"},
+                            "memory_to_write": {"type": ["string", "null"]},
+                            "should_write_memory": {"type": ["string", "null"]},
                         },
-                        "required": ["reply"]
-                    }
-                }
-            }
+                        "required": ["reply"],
+                    },
+                },
+            },
         )
-        # Use parsed JSON, not raw text
-        choice = completion.choices[0].message.parsed
-        return choice
+        try:
+            parsed = response.output[0].content[0].parsed  # type: ignore[index]
+        except Exception:
+            parsed_text = response.output_text or ""
+            parsed = json.loads(parsed_text) if parsed_text else None
+
+        if not parsed:
+            raise ValueError("No parsed content returned from OpenAI response.")
+
+        return parsed
     except Exception as exc:  # pragma: no cover - defensive
         conversation.logger.error("Conversation skill failed: %s", exc)
         return "My apologies Sir, my thoughts are momentarily elsewhere."
