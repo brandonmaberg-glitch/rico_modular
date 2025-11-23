@@ -5,7 +5,12 @@ import sqlite3
 from datetime import datetime, timedelta
 from typing import Any
 
+import numpy as np
+from openai import OpenAI
+
 from .memory_schema import DB_PATH, create_tables
+
+client = OpenAI()
 
 # Ensure tables exist on module import
 create_tables()
@@ -21,6 +26,14 @@ def connect() -> sqlite3.Connection:
     return sqlite3.connect(DB_PATH)
 
 
+def generate_embedding(text: str) -> bytes:
+    """Generate and return an embedding for the given text as bytes."""
+    response = client.embeddings.create(model="text-embedding-3-small", input=text)
+    embedding = response.data[0].embedding
+    embedding_array = np.array(embedding, dtype=np.float32)
+    return embedding_array.tobytes()
+
+
 def save_long_term_memory(
     text: str,
     category: str,
@@ -29,6 +42,8 @@ def save_long_term_memory(
 ) -> int:
     """Insert a new long-term memory and return its ID."""
     timestamp = get_current_timestamp()
+    if embedding is None:
+        embedding = generate_embedding(text)
     with connect() as conn:
         cursor = conn.cursor()
         cursor.execute(
@@ -78,6 +93,48 @@ def delete_long_term_memory(memory_id: int) -> None:
         cursor = conn.cursor()
         cursor.execute("DELETE FROM long_term_memory WHERE id = ?", (memory_id,))
         conn.commit()
+
+
+def embedding_from_blob(blob: bytes) -> np.ndarray:
+    """Convert a stored embedding BLOB back into a NumPy array."""
+    return np.frombuffer(blob, dtype=np.float32)
+
+
+def get_relevant_memories(query: str, top_k: int = 5) -> list[dict[str, Any]]:
+    """Return the most relevant long-term memories for a query using embeddings."""
+    query_embedding_array = embedding_from_blob(generate_embedding(query))
+    query_norm = np.linalg.norm(query_embedding_array)
+
+    with connect() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id, text, category, importance, last_updated, embedding FROM long_term_memory WHERE embedding IS NOT NULL"
+        )
+        memories = []
+        for memory_id, text, category, importance, last_updated, embedding_blob in cursor.fetchall():
+            memory_embedding_array = embedding_from_blob(embedding_blob)
+            memory_norm = np.linalg.norm(memory_embedding_array)
+            if query_norm == 0 or memory_norm == 0:
+                similarity = 0.0
+            else:
+                similarity = float(
+                    np.dot(query_embedding_array, memory_embedding_array)
+                    / (query_norm * memory_norm)
+                )
+
+            memories.append(
+                {
+                    "id": memory_id,
+                    "text": text,
+                    "category": category,
+                    "importance": importance,
+                    "last_updated": last_updated,
+                    "similarity": similarity,
+                }
+            )
+
+    memories.sort(key=lambda item: item["similarity"], reverse=True)
+    return memories[:top_k]
 
 
 def set_short_term(key: str, value: str, ttl_seconds: int = 300) -> None:
