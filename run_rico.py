@@ -8,6 +8,7 @@ from core.intent_router import select_skill
 from config.settings import AppConfig
 from core.skill_registry import SkillRegistry
 from logs.logger import setup_logger
+from memory.memory_manager import process_memory_suggestion
 from router.command_router import CommandRouter
 from skills import car_info, conversation, system_status, web_search
 from stt.base import SpeechToTextEngine, TranscriptionResult
@@ -210,11 +211,49 @@ def _run_conversation_loop(
 
         if response is None:
             response = router.route(text)
+        suggested_memory = None
+        should_write_memory = None
+        memory_result = None
+        if isinstance(response, dict):
+            suggested_memory = response.get("memory_to_write")
+            should_write_memory = response.get("should_write_memory")
+            memory_result = process_memory_suggestion(
+                {
+                    "should_write_memory": should_write_memory,
+                    "memory_to_write": suggested_memory,
+                }
+            )
+        if isinstance(response, dict):
+            response_text = response.get("response") or response.get("reply") or str(response)
+        else:
+            response_text = response
         logger.info("Skill response: %s", response)
         send_thinking(0.0)
-        send_reply(response)
-        tts_engine.speak(response)
-
+        send_reply(response_text)
+        tts_engine.speak(response_text)
+        if memory_result is True:
+            logger.info("Memory saved.")
+        elif memory_result == "ask" and suggested_memory:
+            tts_engine.speak("Shall I remember that, Sir?")
+            send_listening(True)
+            confirmation = stt_engine.transcribe(timeout=silence_timeout)
+            send_listening(False)
+            if isinstance(confirmation, TranscriptionResult):
+                confirmation_text = confirmation.text
+            else:  # pragma: no cover - legacy behaviour
+                confirmation_text = str(confirmation)
+            if confirmation_text:
+                lowered_confirmation = confirmation_text.strip().lower()
+                if lowered_confirmation.startswith("y"):
+                    final_result = process_memory_suggestion(
+                        {
+                            "should_write_memory": "yes",
+                            "memory_to_write": suggested_memory,
+                        }
+                    )
+                    if final_result:
+                        logger.info("Memory saved.")
+        
 
 if __name__ == "__main__":
     main()

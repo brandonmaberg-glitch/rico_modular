@@ -188,6 +188,30 @@ def should_save_memory(text: str) -> str:
     return "ask"
 
 
+def process_memory_suggestion(suggestion: dict) -> bool:
+    """Handle LLM-provided memory suggestions and persist when approved."""
+
+    should_write = suggestion.get("should_write_memory") if suggestion else None
+    memory_text = suggestion.get("memory_to_write") if suggestion else None
+
+    if should_write == "no":
+        return False
+
+    if should_write == "ask":
+        return "ask"
+
+    if should_write == "yes":
+        cleaned = clean_memory(memory_text)
+        if cleaned is None:
+            return False
+        category = categorise_memory(cleaned)
+        importance = estimate_importance(cleaned)
+        save_long_term_memory(cleaned, category, importance)
+        return True
+
+    return False
+
+
 def estimate_importance(text: str) -> float:
     """Estimate the importance of a memory based on its content."""
 
