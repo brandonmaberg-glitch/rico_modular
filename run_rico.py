@@ -179,9 +179,9 @@ def _conversation_with_memory(text: str) -> dict:
 def build_skill_registry(config: AppConfig):
     """Create the mapping of skill names to callable handlers."""
     registry = SkillRegistry()
-    loaded_skills = SkillLoader.load_skills()
+    skills = SkillLoader.load_skills()
 
-    for skill in loaded_skills:
+    for skill in skills:
         registry.register(skill)
 
     from skills.conversation import ConversationSkill
@@ -194,7 +194,9 @@ def build_skill_registry(config: AppConfig):
 
     registry.register(conversation_skill)
 
-    loaded_skill_names = [skill.__class__.__name__ for skill in loaded_skills]
+    skills.append(conversation_skill)
+
+    loaded_skill_names = [skill.__class__.__name__ for skill in skills]
     logger.info("Loaded skills: %s", ", ".join(loaded_skill_names) or "none")
 
     return (
