@@ -390,6 +390,36 @@ def clear_expired_short_term() -> None:
         conn.commit()
 
 
+def set_context(key: str, value: str, ttl_seconds: int = 60) -> None:
+    """Store contextual short-term memory with a default one-minute TTL."""
+
+    set_short_term(key, value, ttl_seconds)
+
+
+def get_context(key: str) -> str | None:
+    """Retrieve contextual short-term memory if it has not expired."""
+
+    return get_short_term(key)
+
+
+def clear_context(key: str) -> None:
+    """Remove a specific contextual short-term memory entry."""
+
+    with connect() as conn:
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM short_term_memory WHERE key = ?", (key,))
+        conn.commit()
+
+
+def clear_all_context() -> None:
+    """Remove all contextual short-term memory entries."""
+
+    with connect() as conn:
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM short_term_memory")
+        conn.commit()
+
+
 def save_skill_memory(skill: str, key: str, value: str) -> None:
     """Upsert a skill-specific memory entry."""
     with connect() as conn:

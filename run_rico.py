@@ -8,7 +8,7 @@ from core.intent_router import select_skill
 from config.settings import AppConfig
 from core.skill_registry import SkillRegistry
 from logs.logger import setup_logger
-from memory.memory_manager import process_memory_suggestion
+from memory.memory_manager import get_context, process_memory_suggestion, set_context
 from router.command_router import CommandRouter
 from skills import car_info, conversation, system_status, web_search
 from stt.base import SpeechToTextEngine, TranscriptionResult
@@ -111,6 +111,40 @@ def _normalise_command(text: str) -> str:
     return text.strip().lower().rstrip(".,?!")
 
 
+def is_vague(text: str) -> bool:
+    """Return True for short acknowledgements or ambiguous replies."""
+
+    lowered = text.strip().lower()
+    if not lowered:
+        return True
+
+    acknowledgement_phrases = {
+        "yes",
+        "no",
+        "yeah",
+        "nope",
+        "ok",
+        "okay",
+        "sure",
+        "probably",
+        "maybe",
+        "alright",
+        "alright perfect",
+        "that's good",
+        "that is good",
+        "what about now",
+        "i guess that means no",
+    }
+    if lowered in acknowledgement_phrases:
+        return True
+
+    if len(lowered) < 10:
+        return True
+
+    short_tokens = {"yup", "yep", "uh-huh", "k", "cool", "fine"}
+    return lowered.rstrip(".?!") in short_tokens
+
+
 def _handle_voice_command(command: str, tts_engine: Speaker) -> bool:
     """Switch TTS provider based on the voice command provided."""
 
@@ -188,24 +222,54 @@ def _run_conversation_loop(
         response = None
         if skill_registry:
             try:
-                available_skills = [
-                    {
-                        "name": skill.name or skill.__name__,
-                        "description": getattr(skill, "description", ""),
-                    }
-                    for skill in skill_registry.all()
-                ]
-                if available_skills:
-                    skill_name = select_skill(text, available_skills)
-                    selected_skill = skill_registry.get(skill_name)
-                    if selected_skill:
-                        response = selected_skill.run(text)
-                    else:
-                        logger.info(
-                            "No matching skill found for '%s'; falling back to conversation.",
-                            skill_name,
-                        )
-                        response = router.skills.get("conversation", router.route)(text)
+                if is_vague(text):
+                    last_skill = get_context("last_skill")
+                    if last_skill:
+                        selected_skill = skill_registry.get(last_skill)
+                        if selected_skill:
+                            query_text = text
+                            if last_skill == "weather":
+                                location_hint = get_context("last_location")
+                                if location_hint:
+                                    query_text = location_hint
+                                    set_context("last_location", location_hint, ttl_seconds=60)
+                                extractor = getattr(selected_skill, "_extract_location", None)
+                                if callable(extractor):
+                                    location_for_context = extractor(query_text)
+                                    if location_for_context:
+                                        set_context(
+                                            "last_location", location_for_context, ttl_seconds=60
+                                        )
+                            response = selected_skill.run(query_text)
+                            set_context("last_skill", last_skill, ttl_seconds=60)
+                if response is None:
+                    available_skills = [
+                        {
+                            "name": skill.name or skill.__name__,
+                            "description": getattr(skill, "description", ""),
+                        }
+                        for skill in skill_registry.all()
+                    ]
+                    if available_skills:
+                        skill_name = select_skill(text, available_skills)
+                        selected_skill = skill_registry.get(skill_name)
+                        if selected_skill:
+                            set_context("last_skill", skill_name, ttl_seconds=60)
+                            if skill_name == "weather":
+                                extractor = getattr(selected_skill, "_extract_location", None)
+                                if callable(extractor):
+                                    location_for_context = extractor(text)
+                                    if location_for_context:
+                                        set_context(
+                                            "last_location", location_for_context, ttl_seconds=60
+                                        )
+                            response = selected_skill.run(text)
+                        else:
+                            logger.info(
+                                "No matching skill found for '%s'; falling back to conversation.",
+                                skill_name,
+                            )
+                            response = router.skills.get("conversation", router.route)(text)
             except Exception as exc:  # pragma: no cover - defensive fallback
                 logger.exception("Skill selection or execution failed: %s", exc)
 
