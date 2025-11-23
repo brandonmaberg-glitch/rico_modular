@@ -131,16 +131,16 @@ def _conversation_with_memory(text: str) -> dict:
     # 6. Define the function tool (the correct replacement for response_format)
     tools = [
         {
+            "name": "memory_response",
             "type": "function",
             "function": {
-                "name": "memory_response",
                 "description": "Structured memory-aware reply from RICO.",
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "reply": {"type": "string"},
                         "memory_to_write": {"type": ["string", "null"]},
-                        "should_write_memory": {"type": ["string", "null"]},
+                        "should_write_memory": {"type": ["string", "null"]}
                     },
                     "required": ["reply"]
                 }
