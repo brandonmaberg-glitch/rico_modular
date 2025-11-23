@@ -45,16 +45,12 @@ def _conversation_with_memory(text: str) -> str:
             for memory in relevant_memories
         )
         memory_context = (
-            "You have stored user memories. Use any that are relevant to answer the user and do not "
-            "ask them to repeat information. If a memory applies, weave it naturally into your reply.\n"
-            f"Relevant memories:\n{bullet_list}\n\n"
+            "You have stored user memories. When answering, incorporate any memory that applies "
+            "and avoid asking the user again.\n"
+            f"Memories:\n{bullet_list}\n\n"
         )
-        logger.debug("Injecting %d relevant memories", len(relevant_memories))
     else:
-        memory_context = (
-            "You have no stored memories relevant to this request. Answer based only on the prompt "
-            "and your persona.\n\n"
-        )
+        memory_context = "No stored memories are available for this query.\n\n"
 
     if not conversation._client:
         return "Terribly sorry Sir, my conversational faculties are offline just now."
