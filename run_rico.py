@@ -74,37 +74,46 @@ def _conversation_with_memory(text: str) -> str:
             model=conversation._select_model(text),
             input=[
                 {
-                    "role": message["role"],
-                    "content": [{"type": "text", "text": message["content"]}],
-                }
-                for message in messages
-            ],
-            response_format={
-                "type": "json_schema",
-                "json_schema": {
-                    "name": "rico_conversation_response",
-                    "schema": {
-                        "type": "object",
-                        "properties": {
-                            "reply": {"type": "string"},
-                            "memory_to_write": {"type": ["string", "null"]},
-                            "should_write_memory": {"type": ["string", "null"]},
-                        },
-                        "required": ["reply"],
-                    },
+                    "role": "system",
+                    "content": [
+                        {
+                            "type": "response_format",
+                            "format": {
+                                "type": "json_schema",
+                                "json_schema": {
+                                    "name": "rico_conversation_response",
+                                    "schema": {
+                                        "type": "object",
+                                        "properties": {
+                                            "reply": {"type": "string"},
+                                            "memory_to_write": {"type": ["string", "null"]},
+                                            "should_write_memory": {"type": ["string", "null"]}
+                                        },
+                                        "required": ["reply"]
+                                    }
+                                }
+                            }
+                        }
+                    ]
                 },
-            },
+                *[
+                    {
+                        "role": msg["role"],
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": msg["content"]
+                            }
+                        ]
+                    }
+                    for msg in messages
+                ]
+            ],
             temperature=0.4,
         )
-        try:
-            parsed = response.output[0].parsed  # type: ignore[index]
-        except Exception:
-            parsed_text = response.output_text or ""
-            parsed = json.loads(parsed_text) if parsed_text else None
 
-        if not parsed:
-            raise ValueError("No parsed content returned from OpenAI response.")
-
+        # The Responses API returns structured JSON here:
+        parsed = response.output[0].parsed
         return parsed
     except Exception as exc:  # pragma: no cover - defensive
         conversation.logger.error("Conversation skill failed: %s", exc)
