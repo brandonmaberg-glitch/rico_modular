@@ -142,15 +142,9 @@ def activate(text: str) -> str:
             messages.append(context_message)
         messages.append({"role": "user", "content": text})
 
-        response = _client.responses.create(
+        completion = _client.chat.completions.create(
             model=_select_model(text),
-            input=[
-                {
-                    "role": message["role"],
-                    "content": [{"type": "text", "text": message["content"]}],
-                }
-                for message in messages
-            ],
+            messages=messages,
             response_format={
                 "type": "json_schema",
                 "json_schema": {
@@ -169,11 +163,11 @@ def activate(text: str) -> str:
             temperature=0.4,
         )
 
-        try:
-            parsed = response.output[0].parsed  # type: ignore[index]
-        except Exception:
-            parsed_text = response.output_text or ""
-            parsed = json.loads(parsed_text) if parsed_text else None
+        content = completion.choices[0].message.content if completion.choices else None
+        if not content:
+            raise ValueError("No content returned from OpenAI response.")
+
+        parsed = json.loads(content)
 
         if not parsed:
             raise ValueError("No parsed content returned from OpenAI response.")
