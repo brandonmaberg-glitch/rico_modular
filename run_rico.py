@@ -38,8 +38,19 @@ def _conversation_with_memory(text: str) -> str:
     """Inject relevant memories into the conversation system prompt."""
 
     relevant_memories = get_relevant_memories(text, top_k=5)
-    memory_text = "\n".join([memory["text"] for memory in relevant_memories])
-    memory_context = f"Relevant memories:\n{memory_text}\n\n"
+
+    if relevant_memories:
+        bullet_list = "\n".join(
+            f"- {memory['text']} (category: {memory['category']}, importance: {memory['importance']:.2f})"
+            for memory in relevant_memories
+        )
+        memory_context = (
+            "You have stored user memories. When answering, incorporate any memory that applies "
+            "and avoid asking the user again.\n"
+            f"Memories:\n{bullet_list}\n\n"
+        )
+    else:
+        memory_context = "No stored memories are available for this query.\n\n"
 
     if not conversation._client:
         return "Terribly sorry Sir, my conversational faculties are offline just now."
