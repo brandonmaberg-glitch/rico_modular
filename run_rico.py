@@ -56,7 +56,7 @@ def _conversation_with_memory(text: str) -> str:
         return "Terribly sorry Sir, my conversational faculties are offline just now."
 
     system_personality_prompt = (
-        f"{conversation._SYSTEM_PROMPT}\npersona:{conversation._PERSONA_ID}\n\n{memory_context}"
+        f"{conversation._SYSTEM_PROMPT}\npersona:{conversation._PERSONA_ID}"
     )
     persona_content = conversation._PERSONA_TEXT
 
@@ -70,89 +70,44 @@ def _conversation_with_memory(text: str) -> str:
     )
 
     try:
-        response = conversation._client.responses.create(
+        messages = [
+            {"role": "system", "content": system_personality_prompt},
+            {"role": "system", "content": memory_context},
+            {"role": "system", "content": persona_content},
+        ]
+        if context_message:
+            messages.append(context_message)
+        messages.append({"role": "user", "content": text})
+
+        completion = conversation._client.chat.completions.create(
             model=conversation._select_model(text),
-            input=[
-                {
-                    "role": "system",
-                    "content": [
-                        {
-                            "type": "response_format",
-                            "format": {
-                                "type": "json_schema",
-                                "json_schema": {
-                                    "name": "rico_conversation_response",
-                                    "schema": {
-                                        "type": "object",
-                                        "properties": {
-                                            "reply": {"type": "string"},
-                                            "memory_to_write": {"type": ["string", "null"]},
-                                            "should_write_memory": {"type": ["string", "null"]}
-                                        },
-                                        "required": ["reply"]
-                                    }
-                                }
-                            }
-                        }
-                    ]
+            messages=messages,
+            response_format={
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "rico_conversation_response",
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "reply": {"type": "string"},
+                            "memory_to_write": {"type": ["string", "null"]},
+                            "should_write_memory": {"type": ["string", "null"]},
+                        },
+                        "required": ["reply"],
+                    },
                 },
-                {
-                    "role": "system",
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": memory_context
-                        }
-                    ]
-                },
-                {
-                    "role": "system",
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": system_personality_prompt
-                        }
-                    ]
-                },
-                {
-                    "role": "system",
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": persona_content
-                        }
-                    ]
-                },
-                *(
-                    [
-                        {
-                            "role": context_message["role"],
-                            "content": [
-                                {
-                                    "type": "text",
-                                    "text": context_message["content"]
-                                }
-                            ]
-                        }
-                    ]
-                    if context_message
-                    else []
-                ),
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": text
-                        }
-                    ]
-                }
-            ],
+            },
             temperature=0.4,
         )
 
-        # The Responses API returns structured JSON here:
-        parsed = response.output[0].parsed
+        content = completion.choices[0].message.content if completion.choices else None
+        if not content:
+            raise ValueError("No content returned from OpenAI response.")
+
+        parsed = json.loads(content)
+        if not parsed:
+            raise ValueError("No parsed content returned from OpenAI response.")
+
         return parsed
     except Exception as exc:  # pragma: no cover - defensive
         conversation.logger.error("Conversation skill failed: %s", exc)
