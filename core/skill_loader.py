@@ -31,8 +31,17 @@ def load_skills() -> List[BaseSkill]:
         module_name = f"skills.{module_file.stem}"
         module = import_module(module_name)
 
-        for _, obj in inspect.getmembers(module, inspect.isclass):
+        for name, obj in inspect.getmembers(module, inspect.isclass):
             if issubclass(obj, BaseSkill) and obj is not BaseSkill:
-                skill_instances.append(obj())
+                # Skip ConversationSkill – it requires special construction
+                if name == "ConversationSkill":
+                    continue
+
+                try:
+                    # Attempt to instantiate normally
+                    skill_instances.append(obj())
+                except TypeError:
+                    # Skip any skills requiring parameters
+                    continue
 
     return skill_instances
