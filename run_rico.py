@@ -40,37 +40,36 @@ logger = logging.getLogger("RICO")
 
 def _conversation_with_memory(text: str) -> dict:
     """
-    Generate a conversation response using the OpenAI Responses API with JSON schema,
-    memory injection, persona, and system prompt.
+    Memory-aware conversation using the NEW OpenAI Responses API
+    with function-calling (tools) for structured JSON output.
     """
 
-    # Retrieve relevant memories
+    # 1. Retrieve relevant memories
     relevant_memories = get_relevant_memories(text, top_k=5)
 
     if relevant_memories:
         bullet_list = "\n".join(
-            f"- {memory['text']} (category: {memory['category']}, importance: {memory['importance']:.2f})"
-            for memory in relevant_memories
+            f"- {m['text']} (category: {m['category']}, importance: {m['importance']:.2f})"
+            for m in relevant_memories
         )
         memory_context = (
-            "You have stored user memories. When answering, incorporate any memory that applies "
-            "and avoid asking the user again.\n"
+            "You have stored user memories. Use them when answering.\n"
             f"Memories:\n{bullet_list}\n\n"
         )
     else:
-        memory_context = "No stored memories are available for this query.\n\n"
+        memory_context = "No stored memories are available.\n\n"
 
-    # Safety check
+    # 2. Safety check
     if not conversation._client:
-        return {"reply": "Terribly sorry Sir, my conversational faculties appear to be offline."}
+        return {"reply": "Terribly sorry Sir, my conversational faculties are offline."}
 
-    # Build system prompt and persona
+    # 3. Build personality + persona
     system_personality_prompt = (
         f"{conversation._SYSTEM_PROMPT}\npersona:{conversation._PERSONA_ID}"
     )
     persona_content = conversation._PERSONA_TEXT
 
-    # Determine contextual subject
+    # 4. Detect subject to build contextual memory
     subject, subject_type = conversation.detect_subject(text)
     if subject:
         conversation.set_context_topic(subject, subject_type)
@@ -80,97 +79,99 @@ def _conversation_with_memory(text: str) -> dict:
         else None
     )
 
-    # Build the Responses API input list
+    # 5. Build Inputs (NEW API FORMAT)
     input_blocks = [
-        # JSON schema specification
+
+        # System personality block
         {
             "role": "system",
             "content": [
-                {
-                    "type": "response_format",
-                    "format": {
-                        "type": "json_schema",
-                        "json_schema": {
-                            "name": "rico_conversation_response",
-                            "schema": {
-                                "type": "object",
-                                "properties": {
-                                    "reply": {"type": "string"},
-                                    "memory_to_write": {"type": ["string", "null"]},
-                                    "should_write_memory": {"type": ["string", "null"]},
-                                },
-                                "required": ["reply"],
-                            },
-                        },
-                    },
-                }
-            ],
+                {"type": "input_text", "text": system_personality_prompt}
+            ]
         },
 
-        # System personality prompt (NO memory inside)
+        # Persona
         {
             "role": "system",
             "content": [
-                {"type": "text", "text": system_personality_prompt}
-            ],
+                {"type": "input_text", "text": persona_content}
+            ]
         },
 
-        # Persona description
+        # Memory context
         {
             "role": "system",
             "content": [
-                {"type": "text", "text": persona_content}
-            ],
-        },
-
-        # Memory context (separate block so it is NOT ignored)
-        {
-            "role": "system",
-            "content": [
-                {"type": "text", "text": memory_context}
-            ],
+                {"type": "input_text", "text": memory_context}
+            ]
         },
     ]
 
-    # Optional context injection
+    # Optional context block
     if context_message:
         input_blocks.append(
             {
                 "role": context_message["role"],
                 "content": [
-                    {"type": "text", "text": context_message["content"]}
-                ],
+                    {"type": "input_text", "text": context_message["content"]}
+                ]
             }
         )
 
-    # Final user message
+    # User message LAST
     input_blocks.append(
         {
             "role": "user",
             "content": [
-                {"type": "text", "text": text}
-            ],
+                {"type": "input_text", "text": text}
+            ]
         }
     )
 
-    # Call Responses API
+    # 6. Define the function tool (the correct replacement for response_format)
+    tools = [
+        {
+            "type": "function",
+            "function": {
+                "name": "memory_response",
+                "description": "Structured memory-aware reply from RICO.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "reply": {"type": "string"},
+                        "memory_to_write": {"type": ["string", "null"]},
+                        "should_write_memory": {"type": ["string", "null"]},
+                    },
+                    "required": ["reply"]
+                }
+            }
+        }
+    ]
+
+    # 7. Call the NEW Responses API
     try:
         completion = conversation._client.responses.create(
             model=conversation._select_model(text),
             input=input_blocks,
+            tools=tools,
             temperature=0.4,
         )
 
-        parsed = completion.output[0].parsed
-        if not parsed:
-            raise ValueError("No parsed JSON received from Responses API.")
+        # Extract args from the tool call
+        output = completion.output[0]
 
-        return parsed
+        if hasattr(output, "tool_calls") and output.tool_calls:
+            tool_call = output.tool_calls[0]
+            args = tool_call.function.arguments
+            return json.loads(args)
+
+        # Fallback: plain text
+        return {"reply": output.text, "memory_to_write": None, "should_write_memory": None}
 
     except Exception as exc:
-        conversation.logger.error("Conversation skill failed: %s", exc)
+        conversation.logger.error("Conversation failed: %s", exc)
         return {
-            "reply": "My apologies Sir, my thoughts are momentarily elsewhere.",
+            "reply": "My apologies Sir, something went wrong.",
             "memory_to_write": None,
             "should_write_memory": None,
         }
