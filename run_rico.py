@@ -14,7 +14,10 @@ from core.intent_router import select_skill
 from core.skill_registry import SkillRegistry
 from logs.logger import setup_logger
 from memory.memory_manager import (
+    append_conversation_turn,
+    clear_conversation_history,
     get_context,
+    get_conversation_history,
     get_relevant_memories,
     periodic_memory_maintenance,
     process_memory_suggestion,
@@ -232,11 +235,38 @@ def _conversation_with_memory(text: str) -> dict:
         else None
     )
 
+    conversation_history = get_conversation_history(max_turns=8)
+    history_block = None
+    if conversation_history:
+        history_lines = [
+            "Recent conversation with the user (most recent last).",
+            "Use this as context for follow-up questions and references:",
+        ]
+
+        for idx, turn in enumerate(conversation_history, start=1):
+            user_text = turn.get("user", "")
+            assistant_text = turn.get("assistant", "")
+            history_lines.append(f"{idx}. User: {user_text}")
+            history_lines.append(f"   RICO: {assistant_text}")
+
+        history_block = "\n".join(history_lines)
+
     # 5. Build Inputs (NEW API FORMAT)
     system_content_blocks = [
         {"type": "input_text", "text": system_personality_prompt},
         {"type": "input_text", "text": persona_content},
         {"type": "input_text", "text": memory_context},
+    ]
+
+    if context_message:
+        system_content_blocks.append(
+            {"type": "input_text", "text": context_message["content"]}
+        )
+
+    if history_block:
+        system_content_blocks.append({"type": "input_text", "text": history_block})
+
+    system_content_blocks.append(
         {
             "type": "input_text",
             "text": (
@@ -244,13 +274,8 @@ def _conversation_with_memory(text: str) -> dict:
                 "memory suggestions as structured JSON. Never return plain text "
                 "or JSON outside of the tool."
             ),
-        },
-    ]
-
-    if context_message:
-        system_content_blocks.append(
-            {"type": "input_text", "text": context_message["content"]}
-        )
+        }
+    )
 
     input_blocks = [
         {
@@ -381,6 +406,7 @@ def main() -> None:
                 break
 
             logger.info("Wakeword detected. Entering conversation mode...")
+            clear_conversation_history()
             _run_conversation_loop(
                 stt_engine=stt_engine,
                 tts_engine=tts_engine,
@@ -606,6 +632,10 @@ def _run_conversation_loop(
         else:
             response_text = response
         logger.info("Skill response: %s", response)
+        try:
+            append_conversation_turn(text, response_text)
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.warning("Failed to append conversation history: %s", exc)
         send_thinking(0.0)
         send_reply(response_text)
         tts_engine.speak(response_text)
