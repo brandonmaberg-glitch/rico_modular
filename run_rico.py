@@ -5,7 +5,6 @@ import json
 import logging
 import os
 import re
-from typing import Optional
 
 import conversation
 import core.skill_loader as SkillLoader
@@ -235,21 +234,20 @@ def _conversation_with_memory(text: str) -> dict:
         else None
     )
 
-    conversation_history = get_conversation_history(max_turns=8)
-    history_block = None
-    if conversation_history:
-        history_lines = [
-            "Recent conversation with the user (most recent last).",
-            "Use this as context for follow-up questions and references:",
-        ]
-
-        for idx, turn in enumerate(conversation_history, start=1):
-            user_text = turn.get("user", "")
-            assistant_text = turn.get("assistant", "")
-            history_lines.append(f"{idx}. User: {user_text}")
-            history_lines.append(f"   RICO: {assistant_text}")
-
-        history_block = "\n".join(history_lines)
+    # 1b. Retrieve recent short-term conversation history
+    recent_turns = get_conversation_history(max_turns=8)
+    if recent_turns:
+        history_lines = []
+        for turn in recent_turns:
+            u = turn.get("user") or ""
+            a = turn.get("assistant") or ""
+            if u:
+                history_lines.append(f"User: {u}")
+            if a:
+                history_lines.append(f"RICO: {a}")
+        history_text = "Recent conversation (most recent last):\n" + "\n".join(history_lines) + "\n\n"
+    else:
+        history_text = ""
 
     # 5. Build Inputs (NEW API FORMAT)
     system_content_blocks = [
@@ -258,13 +256,15 @@ def _conversation_with_memory(text: str) -> dict:
         {"type": "input_text", "text": memory_context},
     ]
 
+    if history_text:
+        system_content_blocks.append(
+            {"type": "input_text", "text": history_text}
+        )
+
     if context_message:
         system_content_blocks.append(
             {"type": "input_text", "text": context_message["content"]}
         )
-
-    if history_block:
-        system_content_blocks.append({"type": "input_text", "text": history_block})
 
     system_content_blocks.append(
         {
@@ -341,6 +341,87 @@ def _conversation_with_memory(text: str) -> dict:
             "memory_to_write": None,
             "should_write_memory": None,
         }
+
+
+def style_reply_with_rico(user_text: str, raw_reply: str) -> str:
+    """
+    Take a raw skill reply and lightly rewrite it in RICO's butler persona,
+    using recent conversation as context. Uses a small model to keep costs low.
+    """
+
+    if not raw_reply or not conversation._client:
+        return raw_reply
+
+    # Pull in recent conversation history for extra context, but keep it short.
+    recent_turns = get_conversation_history(max_turns=6)
+    history_snippets = []
+    for turn in recent_turns:
+        u = turn.get("user")
+        a = turn.get("assistant")
+        if u:
+            history_snippets.append(f"User: {u}")
+        if a:
+            history_snippets.append(f"RICO: {a}")
+    history_text = "\n".join(history_snippets) if history_snippets else ""
+
+    system_text = (
+        f"{conversation._SYSTEM_PROMPT}\npersona:{conversation._PERSONA_ID}\n\n"
+        "You are RICO, a polite, concise British butler-style assistant. "
+        "Rewrite the given TOOL RESPONSE into a natural spoken reply that you would say to the user. "
+        "Keep it short, conversational, and in first person. DO NOT add new facts – just rephrase.\n"
+    )
+
+    if history_text:
+        system_text += (
+            "\nRelevant recent conversation:\n"
+            f"{history_text}\n"
+        )
+
+    # Use a small model for styling to save tokens
+    try:
+        resp = conversation._client.responses.create(
+            model="gpt-4.1-mini",
+            input=[
+                {
+                    "role": "system",
+                    "content": [
+                        {"type": "input_text", "text": system_text},
+                    ],
+                },
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "input_text",
+                            "text": (
+                                "User just said:\n"
+                                f"{user_text}\n\n"
+                                "TOOL RESPONSE (what the skill returned):\n"
+                                f"{raw_reply}\n\n"
+                                "Now rewrite that TOOL RESPONSE as your spoken reply."
+                            ),
+                        }
+                    ],
+                },
+            ],
+            temperature=0.3,
+        )
+
+        # Simple text extraction from Responses API output
+        response_dict = resp.model_dump()
+        outputs = response_dict.get("output") or []
+        for item in outputs:
+            if item.get("type") == "message":
+                for block in item.get("content", []) or []:
+                    text = block.get("text")
+                    if text:
+                        return text
+
+        # Fallback
+        return raw_reply
+    except Exception as exc:
+        conversation.logger.error("Failed to style reply with RICO persona: %s", exc)
+        return raw_reply
 
 
 def build_skill_registry(config: AppConfig):
@@ -573,9 +654,12 @@ def _run_conversation_loop(
             send_listening(False)
             break
 
+        user_text = text
+
         send_thinking(0.85)
 
         response = None
+        selected_skill = None
         if skill_registry:
             try:
                 if is_vague(text):
@@ -655,15 +739,28 @@ def _run_conversation_loop(
         if isinstance(response, dict):
             response_text = response.get("response") or response.get("reply") or str(response)
         else:
-            response_text = response
+            response_text = str(response)
+
+        from skills.conversation import ConversationSkill
+
+        is_conversation_skill = isinstance(selected_skill, ConversationSkill)
+        if not is_conversation_skill and isinstance(response, dict):
+            if {"memory_to_write", "should_write_memory"}.intersection(response.keys()):
+                is_conversation_skill = True
+
+        if is_conversation_skill:
+            styled_reply = response_text
+        else:
+            styled_reply = style_reply_with_rico(user_text, response_text)
+
         logger.info("Skill response: %s", response)
-        try:
-            append_conversation_turn(text, response_text)
-        except Exception as exc:  # pragma: no cover - defensive logging
-            logger.warning("Failed to append conversation history: %s", exc)
         send_thinking(0.0)
-        send_reply(response_text)
-        tts_engine.speak(response_text)
+        send_reply(styled_reply)
+        tts_engine.speak(styled_reply)
+        try:
+            append_conversation_turn(user_text=user_text, assistant_text=styled_reply)
+        except Exception as exc:
+            logger.warning("Failed to append conversation history: %s", exc)
         if memory_result is True:
             logger.info("Memory saved.")
         elif memory_result == "ask" and suggested_memory:
@@ -686,6 +783,11 @@ def _run_conversation_loop(
                     )
                     if final_result:
                         logger.info("Memory saved.")
+
+    try:
+        clear_conversation_history()
+    except Exception as exc:
+        logger.error("Failed to clear conversation history: %s", exc)
         
 
 if __name__ == "__main__":
