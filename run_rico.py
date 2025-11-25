@@ -80,71 +80,69 @@ def _conversation_with_memory(text: str) -> dict:
     )
 
     # 5. Build Inputs (NEW API FORMAT)
-    input_blocks = [
-
-        # System personality block
+    system_content_blocks = [
+        {"type": "input_text", "text": system_personality_prompt},
+        {"type": "input_text", "text": persona_content},
+        {"type": "input_text", "text": memory_context},
         {
-            "role": "system",
-            "content": [
-                {"type": "input_text", "text": system_personality_prompt}
-            ]
+            "type": "input_text",
+            "text": (
+                "Always call the `memory_response` tool to return your reply and "
+                "memory suggestions as structured JSON. Never return plain text "
+                "or JSON outside of the tool."
+            ),
         },
-
-        # Persona
         {
-            "role": "system",
-            "content": [
-                {"type": "input_text", "text": persona_content}
-            ]
-        },
-
-        # Memory context
-        {
-            "role": "system",
-            "content": [
-                {"type": "input_text", "text": memory_context}
-            ]
-        },
-    ]
-
-    # Optional context block
-    if context_message:
-        input_blocks.append(
-            {
-                "role": context_message["role"],
-                "content": [
-                    {"type": "input_text", "text": context_message["content"]}
-                ]
-            }
-        )
-
-    # User message LAST
-    input_blocks.append(
-        {
-            "role": "user",
-            "content": [
-                {"type": "input_text", "text": text}
-            ]
-        }
-    )
-
-    # 6. Define the function tool (the correct replacement for response_format)
-    tools = [
-        {
-            "name": "memory_response",
-            "type": "function",
-            "function": {
-                "description": "Structured memory-aware reply from RICO.",
-                "parameters": {
+            "type": "response_format",
+            "json_schema": {
+                "name": "memory_response",
+                "schema": {
                     "type": "object",
                     "properties": {
                         "reply": {"type": "string"},
                         "memory_to_write": {"type": ["string", "null"]},
-                        "should_write_memory": {"type": ["string", "null"]}
+                        "should_write_memory": {"type": ["string", "null"]},
                     },
-                    "required": ["reply"]
-                }
-            }
+                    "required": ["reply"],
+                    "additionalProperties": False,
+                },
+            },
+        },
+    ]
+
+    if context_message:
+        system_content_blocks.append(
+            {"type": "input_text", "text": context_message["content"]}
+        )
+
+    input_blocks = [
+        {
+            "role": "system",
+            "content": system_content_blocks,
+        },
+        {
+            "role": "user",
+            "content": [
+                {"type": "input_text", "text": text},
+            ],
+        },
+    ]
+
+    # 6. Define the function tool (the correct replacement for response_format)
+    tools = [
+        {
+            "type": "function",
+            "name": "memory_response",
+            "description": "Structured memory-aware reply from RICO.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "reply": {"type": "string"},
+                    "memory_to_write": {"type": ["string", "null"]},
+                    "should_write_memory": {"type": ["string", "null"]},
+                },
+                "required": ["reply"],
+            },
         }
     ]
 
