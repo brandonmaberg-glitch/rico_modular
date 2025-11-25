@@ -39,7 +39,13 @@ logger = logging.getLogger("RICO")
 
 
 def _parse_response_output(completion: object) -> dict | None:
-    """Extract a structured memory_response payload from the Responses API output."""
+    """
+    Extract a structured memory_response payload from the Responses API output.
+
+    Supports both:
+    - Responses-style function calls (output items with type == "function_call")
+    - Plain message text (output items with type == "message")
+    """
 
     try:
         response_dict = completion.model_dump()
@@ -51,10 +57,47 @@ def _parse_response_output(completion: object) -> dict | None:
     if not outputs:
         return None
 
-    message = outputs[0]
-    tool_calls = message.get("tool_calls") or []
+    # 1) Preferred path: Responses-style function calls
+    for item in outputs:
+        item_type = item.get("type")
+        if item_type == "function_call":
+            # We expect our memory tool to be named 'memory_response'
+            tool_name = item.get("name")
+            if tool_name and tool_name != "memory_response":
+                # Ignore other tools, if any
+                continue
 
+            try:
+                args = item.get("arguments") or "{}"
+
+                # arguments may be JSON string or already a dict
+                if isinstance(args, str):
+                    parsed_args = json.loads(args)
+                elif isinstance(args, dict):
+                    parsed_args = args
+                else:
+                    conversation.logger.error(
+                        "Unexpected arguments type in function_call: %r", type(args)
+                    )
+                    return None
+
+                return parsed_args
+            except Exception as exc:  # pragma: no cover - defensive
+                conversation.logger.error("Failed to parse function_call arguments: %s", exc)
+                return None
+
+    # 2) Backwards-compat: look for a message-like item (plain assistant text)
+    message_items = [o for o in outputs if o.get("type") == "message"]
+    if not message_items:
+        return None
+
+    # Typically the last message item is the final assistant message
+    message = message_items[-1]
+
+    # Some older formats may still surface tool calls there
+    tool_calls = message.get("tool_calls") or []
     if not tool_calls:
+        # Or stored inside a content block (Chat Completions-style)
         for block in message.get("content", []) or []:
             if block.get("tool_calls"):
                 tool_calls = block["tool_calls"]
@@ -63,11 +106,20 @@ def _parse_response_output(completion: object) -> dict | None:
     if tool_calls:
         try:
             args = tool_calls[0]["function"]["arguments"]
-            return json.loads(args)
+            if isinstance(args, str):
+                return json.loads(args)
+            elif isinstance(args, dict):
+                return args
+            else:
+                conversation.logger.error(
+                    "Unexpected arguments type in legacy tool call: %r", type(args)
+                )
+                return None
         except Exception as exc:  # pragma: no cover - defensive
-            conversation.logger.error("Failed to parse tool call: %s", exc)
+            conversation.logger.error("Failed to parse legacy tool call: %s", exc)
             return None
 
+    # 3) Plain text fallback – just use whatever assistant text we can find
     for block in message.get("content", []) or []:
         text = block.get("text")
         if text:
