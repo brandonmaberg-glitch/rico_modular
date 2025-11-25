@@ -92,22 +92,6 @@ def _conversation_with_memory(text: str) -> dict:
                 "or JSON outside of the tool."
             ),
         },
-        {
-            "type": "response_format",
-            "json_schema": {
-                "name": "memory_response",
-                "schema": {
-                    "type": "object",
-                    "properties": {
-                        "reply": {"type": "string"},
-                        "memory_to_write": {"type": ["string", "null"]},
-                        "should_write_memory": {"type": ["string", "null"]},
-                    },
-                    "required": ["reply"],
-                    "additionalProperties": False,
-                },
-            },
-        },
     ]
 
     if context_message:
@@ -146,12 +130,30 @@ def _conversation_with_memory(text: str) -> dict:
         }
     ]
 
+    response_format = {
+        "type": "json_schema",
+        "json_schema": {
+            "name": "memory_response",
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "reply": {"type": "string"},
+                    "memory_to_write": {"type": ["string", "null"]},
+                    "should_write_memory": {"type": ["string", "null"]},
+                },
+                "required": ["reply"],
+                "additionalProperties": False,
+            },
+        },
+    }
+
     # 7. Call the NEW Responses API
     try:
         completion = conversation._client.responses.create(
             model=conversation._select_model(text),
             input=input_blocks,
             tools=tools,
+            response_format=response_format,
             temperature=0.4,
         )
 
