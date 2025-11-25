@@ -1,6 +1,7 @@
 """Memory manager for RICO's SQLite-backed memory system."""
 from __future__ import annotations
 
+import json
 import sqlite3
 from datetime import datetime, timedelta
 from typing import Any
@@ -477,6 +478,51 @@ def clear_all_context() -> None:
         cursor = conn.cursor()
         cursor.execute("DELETE FROM short_term_memory")
         conn.commit()
+
+
+def append_conversation_turn(
+    user_text: str, assistant_text: str, max_turns: int = 8
+) -> None:
+    """Append a conversation turn to short-term memory, trimming to the latest turns."""
+
+    history_raw = get_short_term("conversation_history")
+
+    try:
+        history = json.loads(history_raw) if history_raw else []
+        if not isinstance(history, list):
+            history = []
+    except (json.JSONDecodeError, TypeError):
+        history = []
+
+    history.append({"user": user_text, "assistant": assistant_text})
+    if len(history) > max_turns:
+        history = history[-max_turns:]
+
+    set_short_term("conversation_history", json.dumps(history), ttl_seconds=600)
+
+
+def get_conversation_history(max_turns: int = 8) -> list[dict[str, str]]:
+    """Return the most recent conversation history from short-term memory."""
+
+    history_raw = get_short_term("conversation_history")
+
+    try:
+        history = json.loads(history_raw) if history_raw else []
+        if not isinstance(history, list):
+            return []
+    except (json.JSONDecodeError, TypeError):
+        return []
+
+    if len(history) > max_turns:
+        return history[-max_turns:]
+
+    return history
+
+
+def clear_conversation_history() -> None:
+    """Clear the conversation history stored in short-term memory."""
+
+    set_short_term("conversation_history", "[]", ttl_seconds=60)
 
 
 def save_skill_memory(skill: str, key: str, value: str) -> None:
