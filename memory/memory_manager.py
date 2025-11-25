@@ -481,7 +481,7 @@ def clear_all_context() -> None:
 
 
 def append_conversation_turn(
-    user_text: str, assistant_text: str, max_turns: int = 8
+    user_text: str, assistant_text: str | None, ttl_seconds: int = 600
 ) -> None:
     """Append a conversation turn to short-term memory, trimming to the latest turns."""
 
@@ -495,10 +495,10 @@ def append_conversation_turn(
         history = []
 
     history.append({"user": user_text, "assistant": assistant_text})
-    if len(history) > max_turns:
-        history = history[-max_turns:]
+    if len(history) > 8:
+        history = history[-8:]
 
-    set_short_term("conversation_history", json.dumps(history), ttl_seconds=600)
+    set_short_term("conversation_history", json.dumps(history), ttl_seconds=ttl_seconds)
 
 
 def get_conversation_history(max_turns: int = 8) -> list[dict[str, str]]:
@@ -520,9 +520,12 @@ def get_conversation_history(max_turns: int = 8) -> list[dict[str, str]]:
 
 
 def clear_conversation_history() -> None:
-    """Clear the conversation history stored in short-term memory."""
+    """Remove the stored conversation history from short-term memory."""
 
-    set_short_term("conversation_history", "[]", ttl_seconds=60)
+    with connect() as conn:
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM short_term_memory WHERE key = ?", ("conversation_history",))
+        conn.commit()
 
 
 def save_skill_memory(skill: str, key: str, value: str) -> None:
