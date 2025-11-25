@@ -278,7 +278,7 @@ def _conversation_with_memory(text: str) -> dict:
                     "memory_to_write": {"type": ["string", "null"]},
                     "should_write_memory": {"type": ["string", "null"]},
                 },
-                "required": ["reply"],
+                "required": ["reply", "memory_to_write", "should_write_memory"],
                 "additionalProperties": False,
             },
             "strict": True,
