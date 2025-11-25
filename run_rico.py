@@ -467,20 +467,30 @@ def is_vague(text: str) -> bool:
     if lowered in acknowledgement_phrases:
         return True
 
-    follow_up_starts = (
-        "and ",
-        "what about",
-        "how about",
-        "what if",
-        "and tomorrow",
-        "and today",
-    )
-    if any(lowered.startswith(prefix) for prefix in follow_up_starts):
-        return True
+    if len(lowered) <= 50:
+        follow_up_starts = (
+            "and ",
+            "what about",
+            "how about",
+            "what if",
+            "and tomorrow",
+            "and today",
+        )
+        if any(lowered.startswith(prefix) for prefix in follow_up_starts):
+            return True
 
-    time_follow_up_tokens = ("tomorrow", "later", "again")
-    if len(lowered) < 40 and any(token in lowered for token in time_follow_up_tokens):
-        return True
+        follow_up_keywords = (
+            "tomorrow",
+            "later",
+            "tonight",
+            "today",
+            "again",
+            "umbrella",
+            "coat",
+            "jacket",
+        )
+        if any(keyword in lowered for keyword in follow_up_keywords):
+            return True
 
     if len(lowered) < 10:
         return True
