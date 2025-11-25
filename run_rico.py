@@ -38,6 +38,48 @@ from wakeword.engine import WakeWordEngine
 logger = logging.getLogger("RICO")
 
 
+def _parse_response_output(completion: object) -> dict | None:
+    """Extract a structured memory_response payload from the Responses API output."""
+
+    try:
+        response_dict = completion.model_dump()
+    except Exception as exc:  # pragma: no cover - defensive
+        conversation.logger.error("Failed to dump completion: %s", exc)
+        return None
+
+    outputs = response_dict.get("output") or []
+    if not outputs:
+        return None
+
+    message = outputs[0]
+    tool_calls = message.get("tool_calls") or []
+
+    if not tool_calls:
+        for block in message.get("content", []) or []:
+            if block.get("tool_calls"):
+                tool_calls = block["tool_calls"]
+                break
+
+    if tool_calls:
+        try:
+            args = tool_calls[0]["function"]["arguments"]
+            return json.loads(args)
+        except Exception as exc:  # pragma: no cover - defensive
+            conversation.logger.error("Failed to parse tool call: %s", exc)
+            return None
+
+    for block in message.get("content", []) or []:
+        text = block.get("text")
+        if text:
+            return {
+                "reply": text,
+                "memory_to_write": None,
+                "should_write_memory": None,
+            }
+
+    return None
+
+
 def _conversation_with_memory(text: str) -> dict:
     """
     Memory-aware conversation using the NEW OpenAI Responses API
@@ -143,23 +185,9 @@ def _conversation_with_memory(text: str) -> dict:
             temperature=0.4,
         )
 
-        # Extract args from the tool call
-        output = completion.output[0]
-
-        if hasattr(output, "tool_calls") and output.tool_calls:
-            tool_call = output.tool_calls[0]
-            args = tool_call.function.arguments
-            return json.loads(args)
-
-        # Fallback: assistant text-only output (new Responses API structure)
-        if hasattr(output, "content") and output.content:
-            first = output.content[0]
-            if hasattr(first, "text"):
-                return {
-                    "reply": first.text,
-                    "memory_to_write": None,
-                    "should_write_memory": None
-                }
+        parsed = _parse_response_output(completion)
+        if parsed:
+            return parsed
 
         # Final failsafe
         return {
