@@ -138,7 +138,7 @@ def _conversation_with_memory(text: str) -> dict:
             tools=tools,
             tool_choice={
                 "type": "function",
-                "function": {"name": "memory_response"},
+                "name": "memory_response",
             },
             temperature=0.4,
         )
