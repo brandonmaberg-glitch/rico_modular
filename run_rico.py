@@ -271,7 +271,7 @@ def _conversation_with_memory(text: str) -> dict:
             "type": "function",
             "name": "memory_response",
             "description": "Structured memory-aware reply from RICO.",
-            "input_schema": {
+            "parameters": {
                 "type": "object",
                 "properties": {
                     "reply": {"type": "string"},
@@ -279,7 +279,9 @@ def _conversation_with_memory(text: str) -> dict:
                     "should_write_memory": {"type": ["string", "null"]},
                 },
                 "required": ["reply"],
+                "additionalProperties": False,
             },
+            "strict": True,
         }
     ]
 
