@@ -92,22 +92,6 @@ def _conversation_with_memory(text: str) -> dict:
                 "or JSON outside of the tool."
             ),
         },
-        {
-            "type": "response_format",
-            "json_schema": {
-                "name": "memory_response",
-                "schema": {
-                    "type": "object",
-                    "properties": {
-                        "reply": {"type": "string"},
-                        "memory_to_write": {"type": ["string", "null"]},
-                        "should_write_memory": {"type": ["string", "null"]},
-                    },
-                    "required": ["reply"],
-                    "additionalProperties": False,
-                },
-            },
-        },
     ]
 
     if context_message:
@@ -152,6 +136,10 @@ def _conversation_with_memory(text: str) -> dict:
             model=conversation._select_model(text),
             input=input_blocks,
             tools=tools,
+            tool_choice={
+                "type": "function",
+                "function": {"name": "memory_response"},
+            },
             temperature=0.4,
         )
 
