@@ -98,10 +98,10 @@ def _parse_response_output(completion: object) -> dict | None:
 
                 # Normalise expected keys
                 if "reply" not in parsed_args:
-                    conversation.logger.error(
+                    conversation.logger.warning(
                         "memory_response tool_call missing 'reply': %r", parsed_args
                     )
-                    return None
+                    continue
 
                 parsed_args.setdefault("memory_to_write", None)
                 parsed_args.setdefault("should_write_memory", None)
@@ -130,10 +130,10 @@ def _parse_response_output(completion: object) -> dict | None:
                     return None
 
                 if "reply" not in parsed_args:
-                    conversation.logger.error(
+                    conversation.logger.warning(
                         "memory_response function_call missing 'reply': %r", parsed_args
                     )
-                    return None
+                    continue
 
                 parsed_args.setdefault("memory_to_write", None)
                 parsed_args.setdefault("should_write_memory", None)
