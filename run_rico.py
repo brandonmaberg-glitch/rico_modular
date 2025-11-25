@@ -42,9 +42,18 @@ def _parse_response_output(completion: object) -> dict | None:
     """
     Extract a structured memory_response payload from the Responses API output.
 
-    Supports both:
-    - Responses-style function calls (output items with type == "function_call")
-    - Plain message text (output items with type == "message")
+    Supports:
+    - Responses-style tool calls inside message.content[] with type == "tool_call"
+    - Legacy Responses-style items with type == "function_call"
+    - Chat Completions-style message.tool_calls
+    - Plain assistant message text as a last resort
+
+    Returns:
+        dict with keys:
+            "reply": str
+            "memory_to_write": str | None
+            "should_write_memory": str | None
+        or None if nothing usable could be found.
     """
 
     try:
@@ -55,80 +64,130 @@ def _parse_response_output(completion: object) -> dict | None:
 
     outputs = response_dict.get("output") or []
     if not outputs:
+        conversation.logger.error("No 'output' items present in response: %r", response_dict)
         return None
 
-    # 1) Preferred path: Responses-style function calls
-    for item in outputs:
-        item_type = item.get("type")
-        if item_type == "function_call":
-            # We expect our memory tool to be named 'memory_response'
-            tool_name = item.get("name")
-            if tool_name and tool_name != "memory_response":
-                # Ignore other tools, if any
+    # 1) New Responses API pattern:
+    #    - output items with type == "message"
+    #    - message["content"] is a list of blocks
+    #    - each block may have type == "tool_call" with name & arguments
+    message_items = [item for item in outputs if item.get("type") == "message" or item.get("role") == "assistant"]
+    for message in message_items:
+        for block in message.get("content", []) or []:
+            block_type = block.get("type")
+            if block_type not in ("tool_call", "function_call"):
                 continue
 
-            try:
-                args = item.get("arguments") or "{}"
+            # New Responses output usually has these at the block level
+            name = block.get("name") or block.get("function", {}).get("name")
+            if name and name != "memory_response":
+                continue
 
-                # arguments may be JSON string or already a dict
+            args = block.get("arguments") or block.get("function", {}).get("arguments") or "{}"
+
+            try:
                 if isinstance(args, str):
                     parsed_args = json.loads(args)
                 elif isinstance(args, dict):
                     parsed_args = args
                 else:
                     conversation.logger.error(
-                        "Unexpected arguments type in function_call: %r", type(args)
+                        "Unexpected arguments type in tool_call block: %r", type(args)
                     )
                     return None
 
+                # Normalise expected keys
+                if "reply" not in parsed_args:
+                    conversation.logger.error(
+                        "memory_response tool_call missing 'reply': %r", parsed_args
+                    )
+                    return None
+
+                parsed_args.setdefault("memory_to_write", None)
+                parsed_args.setdefault("should_write_memory", None)
                 return parsed_args
             except Exception as exc:  # pragma: no cover - defensive
-                conversation.logger.error("Failed to parse function_call arguments: %s", exc)
+                conversation.logger.error("Failed to parse tool_call arguments: %s", exc)
                 return None
 
-    # 2) Backwards-compat: look for a message-like item (plain assistant text)
-    message_items = [o for o in outputs if o.get("type") == "message"]
-    if not message_items:
-        return None
+    # 2) Legacy Responses-style items with top-level type == "function_call"
+    for item in outputs:
+        if item.get("type") == "function_call":
+            tool_name = item.get("name")
+            if tool_name and tool_name != "memory_response":
+                continue
 
-    # Typically the last message item is the final assistant message
-    message = message_items[-1]
+            try:
+                args = item.get("arguments") or "{}"
+                if isinstance(args, str):
+                    parsed_args = json.loads(args)
+                elif isinstance(args, dict):
+                    parsed_args = args
+                else:
+                    conversation.logger.error(
+                        "Unexpected arguments type in legacy function_call item: %r", type(args)
+                    )
+                    return None
 
-    # Some older formats may still surface tool calls there
-    tool_calls = message.get("tool_calls") or []
-    if not tool_calls:
-        # Or stored inside a content block (Chat Completions-style)
-        for block in message.get("content", []) or []:
-            if block.get("tool_calls"):
-                tool_calls = block["tool_calls"]
-                break
+                if "reply" not in parsed_args:
+                    conversation.logger.error(
+                        "memory_response function_call missing 'reply': %r", parsed_args
+                    )
+                    return None
 
-    if tool_calls:
-        try:
-            args = tool_calls[0]["function"]["arguments"]
-            if isinstance(args, str):
-                return json.loads(args)
-            elif isinstance(args, dict):
-                return args
-            else:
-                conversation.logger.error(
-                    "Unexpected arguments type in legacy tool call: %r", type(args)
-                )
+                parsed_args.setdefault("memory_to_write", None)
+                parsed_args.setdefault("should_write_memory", None)
+                return parsed_args
+            except Exception as exc:  # pragma: no cover - defensive
+                conversation.logger.error("Failed to parse legacy function_call arguments: %s", exc)
                 return None
-        except Exception as exc:  # pragma: no cover - defensive
-            conversation.logger.error("Failed to parse legacy tool call: %s", exc)
-            return None
 
-    # 3) Plain text fallback – just use whatever assistant text we can find
-    for block in message.get("content", []) or []:
-        text = block.get("text")
-        if text:
-            return {
-                "reply": text,
-                "memory_to_write": None,
-                "should_write_memory": None,
-            }
+    # 3) Chat Completions-style tool_calls on the message itself (very old path)
+    if message_items:
+        last_msg = message_items[-1]
+        tool_calls = last_msg.get("tool_calls") or []
+        if not tool_calls:
+            for block in last_msg.get("content", []) or []:
+                if block.get("tool_calls"):
+                    tool_calls = block["tool_calls"]
+                    break
 
+        if tool_calls:
+            try:
+                args = tool_calls[0]["function"]["arguments"]
+                if isinstance(args, str):
+                    parsed_args = json.loads(args)
+                elif isinstance(args, dict):
+                    parsed_args = args
+                else:
+                    conversation.logger.error(
+                        "Unexpected arguments type in legacy tool call: %r", type(args)
+                    )
+                    return None
+
+                if "reply" not in parsed_args:
+                    parsed_args["reply"] = ""
+                parsed_args.setdefault("memory_to_write", None)
+                parsed_args.setdefault("should_write_memory", None)
+                return parsed_args
+            except Exception as exc:  # pragma: no cover - defensive
+                conversation.logger.error("Failed to parse legacy tool call: %s", exc)
+                return None
+
+    # 4) Plain text fallback – just use any assistant text we can find
+    if message_items:
+        last_msg = message_items[-1]
+        for block in last_msg.get("content", []) or []:
+            text = block.get("text")
+            if text:
+                return {
+                    "reply": text,
+                    "memory_to_write": None,
+                    "should_write_memory": None,
+                }
+
+    # Final debug log so we can see future unexpected shapes
+    conversation.logger.error("Unable to interpret model output structure: %r", outputs)
     return None
 
 
