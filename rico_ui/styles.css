@@ -103,6 +103,15 @@ body {
   display: grid;
   place-items: center;
   filter: drop-shadow(0 0 36px rgba(255, 140, 50, 0.35));
+  --outer-duration: 6.4s;
+  --middle-duration: 5.8s;
+  --inner-duration: 7.1s;
+  --outer-opacity-min: 0.76;
+  --outer-opacity-max: 0.94;
+  --middle-opacity-min: 0.72;
+  --middle-opacity-max: 0.98;
+  --inner-opacity-min: 0.82;
+  --inner-opacity-max: 1;
 }
 
 .core-outer,
@@ -113,11 +122,28 @@ body {
   inset: 0;
 }
 
+.core-drift {
+  position: absolute;
+  inset: 4%;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 178, 90, 0.08);
+  background: conic-gradient(from 180deg, rgba(255, 140, 50, 0.05), rgba(255, 140, 50, 0.02), rgba(255, 178, 90, 0.05), rgba(255, 140, 50, 0.03));
+  mix-blend-mode: screen;
+  filter: blur(1px);
+  animation: drift 62s linear infinite;
+  opacity: 0.28;
+  pointer-events: none;
+}
+
 .core-outer {
   border: 1px solid rgba(255, 140, 50, 0.25);
   background: radial-gradient(circle at 35% 35%, rgba(255, 178, 90, 0.08), transparent 65%);
-  animation: pulse-slow 5s ease-in-out infinite;
+  animation: pulse-slow var(--outer-duration) ease-in-out infinite;
+  animation-delay: -0.6s;
   box-shadow: var(--shadow);
+  opacity: 0.9;
+  --opacity-min: var(--outer-opacity-min);
+  --opacity-max: var(--outer-opacity-max);
 }
 
 .core-middle {
@@ -125,16 +151,20 @@ body {
   border: 1px solid rgba(255, 140, 50, 0.28);
   background: radial-gradient(circle at 60% 40%, rgba(255, 140, 50, 0.45), rgba(255, 140, 50, 0.07));
   filter: blur(2px);
-  animation: pulse-slow 4s ease-in-out infinite reverse;
-  opacity: 0.85;
+  animation: pulse-slow var(--middle-duration) ease-in-out infinite reverse;
+  animation-delay: -0.25s;
+  opacity: 0.82;
+  --opacity-min: var(--middle-opacity-min);
+  --opacity-max: var(--middle-opacity-max);
 }
 
 .core-inner {
   inset: 30%;
   background: radial-gradient(circle, rgba(255, 140, 50, 0.85), rgba(255, 140, 50, 0.6));
   box-shadow: inset 0 0 30px rgba(0, 0, 0, 0.35);
-  animation: throb 2.2s ease-in-out infinite;
-  opacity: 0.95;
+  animation: throb var(--inner-duration) ease-in-out infinite;
+  opacity: 0.96;
+  position: relative;
 }
 
 .core::after {
@@ -144,6 +174,22 @@ body {
   border-radius: 50%;
   background: radial-gradient(circle, rgba(255, 255, 255, 0.12), transparent 70%);
   filter: blur(14px);
+  pointer-events: none;
+}
+
+.core-inner::before {
+  content: '';
+  position: absolute;
+  inset: -14%;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 40% 30%, rgba(255, 178, 90, 0.08), transparent 50%),
+    radial-gradient(circle at 70% 60%, rgba(255, 140, 50, 0.06), transparent 40%),
+    conic-gradient(from 45deg, rgba(255, 140, 50, 0.06), rgba(255, 178, 90, 0.01), rgba(255, 140, 50, 0.05));
+  mix-blend-mode: screen;
+  filter: blur(6px);
+  opacity: 0.35;
+  animation: shimmer 14s ease-in-out infinite;
   pointer-events: none;
 }
 
@@ -210,18 +256,40 @@ body {
 .core[data-state="idle"] .core-middle { animation-duration: 4s; }
 .core[data-state="idle"] .core-inner { animation-duration: 2.2s; }
 
+.core[data-state="idle"] {
+  --outer-duration: 6.4s;
+  --middle-duration: 5.8s;
+  --inner-duration: 7.1s;
+}
+
 .core[data-state="thinking"] .core-outer { animation-duration: 2.6s; }
 .core[data-state="thinking"] .core-middle { animation-duration: 2.3s; }
 .core[data-state="thinking"] .core-inner { animation-duration: 1.4s; }
 
+.core[data-state="thinking"] {
+  --outer-duration: 2.8s;
+  --middle-duration: 2.5s;
+  --inner-duration: 1.6s;
+}
+
 @keyframes pulse-slow {
-  0%, 100% { transform: scale(0.96); opacity: 0.8; }
-  50% { transform: scale(1.04); opacity: 1; }
+  0%, 100% { transform: scale(0.96); opacity: var(--opacity-min, 0.8); }
+  50% { transform: scale(1.04); opacity: var(--opacity-max, 1); }
 }
 
 @keyframes throb {
-  0%, 100% { transform: scale(0.94); }
-  50% { transform: scale(1.05); }
+  0%, 100% { transform: scale(0.94); opacity: var(--inner-opacity-min); }
+  50% { transform: scale(1.05); opacity: var(--inner-opacity-max); }
+}
+
+@keyframes drift {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+@keyframes shimmer {
+  0%, 100% { transform: rotate(0deg) scale(0.98); opacity: 0.35; }
+  50% { transform: rotate(6deg) scale(1.02); opacity: 0.48; }
 }
 
 @media (max-width: 768px) {
