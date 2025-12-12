@@ -469,7 +469,13 @@ def main() -> None:
     launch_ui()
 
     wake_engine = WakeWordEngine()
-    stt_engine = SpeechToTextEngine(config.openai_api_key)
+    stt_engine = SpeechToTextEngine(
+        config.openai_api_key,
+        voice_enabled=config.voice_enabled,
+        voice_key=config.voice_key,
+        voice_sample_rate=config.voice_sample_rate,
+        voice_max_seconds=config.voice_max_seconds,
+    )
     tts_engine = Speaker(
         openai_api_key=config.openai_api_key,
         elevenlabs_api_key=config.elevenlabs_api_key,

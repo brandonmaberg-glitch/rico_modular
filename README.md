@@ -37,6 +37,11 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
+Install optional voice dependencies for push-to-talk input:
+```bash
+pip install sounddevice soundfile
+```
+
 ## Environment Variables
 Set the following if you wish to enable cloud integrations:
 - `OPENAI_API_KEY` – enables Whisper/Realtime transcription.
@@ -51,6 +56,18 @@ python run_rico.py
 1. Type `wake` when prompted to trigger the wakeword.
 2. Enter your spoken command (text fallback for now).
 3. RICO routes the intent to the appropriate skill and responds via TTS/logs.
+
+To enable push-to-talk voice input, set:
+```bash
+export VOICE_ENABLED=true
+```
+Optional toggles:
+- `VOICE_KEY` (default: `v`)
+- `VOICE_SAMPLE_RATE` (default: `16000`)
+- `VOICE_MAX_SECONDS` (default: `20`)
+
+When enabled, type `v` at the prompt to start recording, then speak. RICO will
+transcribe the audio and process it through the same pipeline as typed input.
 
 All interactions are logged to `logs/rico.log` for auditing.
 
