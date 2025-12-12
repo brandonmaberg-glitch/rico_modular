@@ -3,78 +3,42 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>RICO | Jarvis HUD</title>
-  <link rel="stylesheet" href="styles.css">
+  <title>RICO | Neural Core</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;700&family=Inter:wght@400;600&display=swap" rel="stylesheet">
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&family=Space+Grotesk:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-  <div class="hud-grid"></div>
-  <div class="hud-glow"></div>
-  <header class="hud-header">
-        <div class="brand">
-      <img src="assets/rico_mark.svg" alt="RICO" class="brand-mark">
-      <div>
-        <div class="brand-title">RICO Assistant</div>
-        <div class="brand-sub">Control Interface</div>
+  <div class="background-glow"></div>
+  <div class="hud-shell">
+    <header class="minimal-header">
+      <div class="title-mark">
+        <div class="core-dot"></div>
+        <div class="title-text">RICO Neural Core</div>
       </div>
-    </div>
-    <div class="status">
-      <div class="status-dot" id="ws-dot"></div>
-      <div class="status-text" id="ws-status">Connecting...</div>
-    </div>
-  </header>
+      <div class="state-indicator" id="state-indicator">Idle</div>
+    </header>
 
-  <main class="layout">
-    <section class="visualiser-card glass">
-      <div class="ring" id="ring">
-        <div class="ring-core"></div>
-        <div class="ring-wave"></div>
-        <div class="ring-pulse"></div>
-      </div>
-      <div class="ring-caption">RICO Presence</div>
-      <div class="provider" id="provider">Voice: Pending</div>
-    </section>
+    <main class="core-stage" aria-live="polite">
+      <section class="core" id="core" data-state="idle">
+        <div class="core-outer"></div>
+        <div class="core-middle"></div>
+        <div class="core-inner"></div>
+        <form class="core-input" id="core-form">
+          <input type="text" id="prompt" name="prompt" autocomplete="off" placeholder="Ask anything…" aria-label="Command input">
+        </form>
+      </section>
+    </main>
 
-    <section class="console-card glass">
-      <div class="section-title">Live Console</div>
-      <div class="console" id="console"></div>
-    </section>
-
-    <section class="results-card glass">
-      <div class="section-title">Results & Visuals</div>
-      <div class="results-layout">
-        <div class="results" id="results"></div>
-        <div class="image-panel">
-          <div class="panel-title">Image Search</div>
-          <div class="image-grid" id="image-grid"></div>
-        </div>
-      </div>
-    </section>
-
-    <section class="widgets-card glass">
-      <div class="section-title">Telemetry & Widgets</div>
-      <div class="widgets" id="widgets">
-        <div class="widget">System status feed will appear here.</div>
-        <div class="widget">Car telemetry placeholder.</div>
-      </div>
-    </section>
-  </main>
-
-  <div class="image-modal" id="image-modal">
-    <div class="image-modal-content">
-      <span class="image-modal-close" id="image-modal-close">&times;</span>
-      <img id="modal-image" alt="Preview">
-    </div>
+    <aside class="tool-overlay left-overlay" aria-hidden="true">
+      <div class="overlay-caption">Left tool channel</div>
+    </aside>
+    <aside class="tool-overlay right-overlay" aria-hidden="true">
+      <div class="overlay-caption">Right tool channel</div>
+    </aside>
   </div>
 
-  <footer class="hud-footer">
-    <div id="skill-indicator">Skill: standby</div>
-    <div id="listening-indicator">Listening: idle</div>
-  </footer>
-
-  <script src="script.js"></script>
+  <script src="core.js"></script>
 </body>
 </html>
