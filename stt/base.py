@@ -1,6 +1,7 @@
 """Speech-to-text pipeline using OpenAI APIs with fallbacks."""
 from __future__ import annotations
 
+import logging
 import os
 import select
 import sys
@@ -13,7 +14,12 @@ try:
 except Exception:  # pragma: no cover - optional dependency
     OpenAI = None  # type: ignore
 
+from rico.voice.ptt_input import record_to_wav
+from rico.voice.transcribe import transcribe_wav
 from utils.text import clean_transcription
+
+
+logger = logging.getLogger("RICO")
 
 
 @dataclass
@@ -27,9 +33,21 @@ class TranscriptionResult:
 class SpeechToTextEngine:
     """Wrapper around OpenAI Whisper with a graceful fallback."""
 
-    def __init__(self, api_key: Optional[str]) -> None:
+    def __init__(
+        self,
+        api_key: Optional[str],
+        *,
+        voice_enabled: bool = False,
+        voice_key: str = "v",
+        voice_sample_rate: int = 16000,
+        voice_max_seconds: int = 20,
+    ) -> None:
         self.api_key = api_key
         self._client = None
+        self.voice_enabled = voice_enabled
+        self.voice_key = (voice_key or "v").lower()
+        self.voice_sample_rate = voice_sample_rate
+        self.voice_max_seconds = voice_max_seconds
         if api_key and OpenAI:
             try:
                 self._client = OpenAI(api_key=api_key)
@@ -55,7 +73,48 @@ class SpeechToTextEngine:
         if timed_out:
             return TranscriptionResult(text="", timed_out=True)
 
+        voice_text = self._maybe_handle_voice_shortcut(raw, timeout)
+        if voice_text is not None:
+            return TranscriptionResult(text=clean_transcription(voice_text), timed_out=False)
+
         return TranscriptionResult(text=clean_transcription(raw), timed_out=False)
+
+    def _maybe_handle_voice_shortcut(self, raw: str, timeout: Optional[float]) -> Optional[str]:
+        """Handle push-to-talk trigger and return transcribed text when available."""
+
+        if raw.strip().lower() != self.voice_key:
+            return None
+
+        if not self.voice_enabled:
+            print("Voice is disabled. Set VOICE_ENABLED=true to use push-to-talk.")
+            return self._retry_text_input(timeout)
+
+        output_path = record_to_wav(
+            sample_rate=self.voice_sample_rate,
+            max_seconds=self.voice_max_seconds,
+        )
+        if not output_path:
+            print("Falling back to typed input.")
+            return self._retry_text_input(timeout)
+
+        transcript = transcribe_wav(output_path)
+        if not transcript:
+            print("Falling back to typed input.")
+            return self._retry_text_input(timeout)
+
+        print(f"Transcription: {transcript}")
+        return transcript
+
+    def _retry_text_input(self, timeout: Optional[float]) -> Optional[str]:
+        try:
+            raw, timed_out = self._read_text_input(timeout)
+        except (EOFError, KeyboardInterrupt):
+            return ""
+
+        if timed_out:
+            return ""
+
+        return raw
 
     def _read_text_input(self, timeout: Optional[float]) -> Tuple[str, bool]:
         """Read text from stdin with an optional timeout, supporting Windows consoles."""
