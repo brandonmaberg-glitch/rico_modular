@@ -100,8 +100,6 @@ body {
   position: relative;
   width: min(520px, 80vw);
   aspect-ratio: 1 / 1;
-  display: grid;
-  place-items: center;
   filter: drop-shadow(0 0 36px rgba(255, 140, 50, 0.35));
   --outer-duration: 6.4s;
   --middle-duration: 5.8s;
@@ -120,6 +118,14 @@ body {
   position: absolute;
   border-radius: 50%;
   inset: 0;
+}
+
+.core-visuals {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
 }
 
 .core-drift {
@@ -194,13 +200,15 @@ body {
 }
 
 .core-input {
-  position: relative;
-  width: min(360px, 72vw);
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
   z-index: 2;
 }
 
 .core-input input {
-  width: 100%;
+  width: min(360px, 72vw);
   padding: 16px 18px;
   border-radius: 18px;
   border: 1px solid rgba(255, 140, 50, 0.5);
