@@ -101,8 +101,6 @@ class SpeechToTextEngine:
         if not transcript:
             print("Falling back to typed input.")
             return self._retry_text_input(timeout)
-
-        print(f"Transcription: {transcript}")
         return transcript
 
     def _retry_text_input(self, timeout: Optional[float]) -> Optional[str]:
