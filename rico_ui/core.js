@@ -5,11 +5,14 @@ const form = document.getElementById('core-form');
 
 /**
  * Centralized state setter for the core pulse.
- * Available states: `idle`, `thinking`.
+ * Available states: `idle`, `thinking`, `listening`.
  */
 function setCoreState(nextState) {
   coreEl.dataset.state = nextState;
   stateIndicator.textContent = nextState.charAt(0).toUpperCase() + nextState.slice(1);
+  if (window.neuralCoreController?.setState) {
+    window.neuralCoreController.setState(nextState);
+  }
 }
 
 // Start in idle mode with a slow breathing pulse.
