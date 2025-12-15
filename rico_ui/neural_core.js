@@ -14,13 +14,13 @@
   let visible = !document.hidden;
   let state = 'idle';
   let center = { x: 0, y: 0 };
-  let nextFlicker = performance.now() + randomRange(10000, 20000);
-  let flicker = { until: 0, pairs: [] };
+  let pulses = [];
+  let nextPulse = performance.now() + randomRange(800, 2500);
 
   const settings = {
-    idle: { pulseSpeed: 0.38, linkOpacity: 0.08 },
-    thinking: { pulseSpeed: 0.55, linkOpacity: 0.12 },
-    listening: { pulseSpeed: 0.55, linkOpacity: 0.12 },
+    idle: { pulseSpeed: 0.36, linkOpacity: 0.06 },
+    thinking: { pulseSpeed: 0.52, linkOpacity: 0.1 },
+    listening: { pulseSpeed: 0.52, linkOpacity: 0.1 },
   };
 
   function randomRange(min, max) {
@@ -39,7 +39,7 @@
         y,
         vx: randomRange(-0.05, 0.05),
         vy: randomRange(-0.05, 0.05),
-        baseRadius: randomRange(1, 2.5),
+        baseRadius: Math.random() < 0.08 ? randomRange(1.3, 1.8) : randomRange(0.7, 1.4),
         pulseOffset: Math.random() * Math.PI * 2,
       });
     }
@@ -111,20 +111,34 @@
     return links;
   }
 
-  function drawLinks(links, now) {
-    const opacityBase = settings[state]?.linkOpacity ?? settings.idle.linkOpacity;
-    const lineWidth = 0.6;
+  function linkKey(a, b) {
+    return a < b ? `${a}-${b}` : `${b}-${a}`;
+  }
 
-    ctx.lineWidth = lineWidth;
+  function buildPulseStrength(now) {
+    const pulseStrength = new Map();
+    pulses.forEach((pulse) => {
+      const progress = Math.min(1, Math.max(0, (now - pulse.start) / (pulse.end - pulse.start)));
+      const eased = Math.sin(progress * Math.PI);
+      pulseStrength.set(pulse.key, eased);
+    });
+    return pulseStrength;
+  }
+
+  function drawLinks(links, now, pulseStrength) {
+    const opacityBase = settings[state]?.linkOpacity ?? settings.idle.linkOpacity;
+    const lineWidth = 0.5;
+
     links.forEach((link) => {
       const a = nodes[link.a];
       const b = nodes[link.b];
       const distance = Math.sqrt(link.distSq);
       const fade = Math.max(0, 1 - distance / (Math.min(width, height) * 0.24));
-      const isFlickering = now < flicker.until && flicker.pairs.some((pair) => pair[0] === link.a && pair[1] === link.b);
-      const alpha = (opacityBase + (isFlickering ? 0.16 : 0)) * fade;
+      const pulseFactor = pulseStrength.get(linkKey(link.a, link.b)) || 0;
+      const alpha = (opacityBase + pulseFactor * 0.16) * fade;
       if (alpha <= 0) return;
 
+      ctx.lineWidth = lineWidth + pulseFactor * 0.5;
       ctx.strokeStyle = `rgba(255, 168, 80, ${alpha.toFixed(3)})`;
       ctx.beginPath();
       ctx.moveTo(a.x, a.y);
@@ -136,33 +150,41 @@
   function drawNodes(now) {
     const pulseSpeed = settings[state]?.pulseSpeed ?? settings.idle.pulseSpeed;
     nodes.forEach((node) => {
-      const pulse = 0.15 * Math.sin(now * 0.0015 * pulseSpeed + node.pulseOffset) + 1;
+      const pulse = 0.12 * Math.sin(now * 0.0014 * pulseSpeed + node.pulseOffset) + 1;
       const r = node.baseRadius * pulse;
-      const gradient = ctx.createRadialGradient(node.x, node.y, 0, node.x, node.y, r * 3);
-      gradient.addColorStop(0, 'rgba(255, 173, 94, 0.9)');
+      const gradient = ctx.createRadialGradient(node.x, node.y, 0, node.x, node.y, r * 1.6);
+      gradient.addColorStop(0, 'rgba(255, 173, 94, 0.18)');
       gradient.addColorStop(1, 'rgba(255, 140, 50, 0)');
       ctx.fillStyle = gradient;
       ctx.beginPath();
-      ctx.arc(node.x, node.y, r * 3, 0, Math.PI * 2);
+      ctx.arc(node.x, node.y, r * 1.6, 0, Math.PI * 2);
       ctx.fill();
 
-      ctx.fillStyle = 'rgba(255, 170, 80, 0.9)';
+      ctx.fillStyle = 'rgba(255, 170, 80, 0.2)';
       ctx.beginPath();
       ctx.arc(node.x, node.y, r, 0, Math.PI * 2);
       ctx.fill();
     });
   }
 
-  function maybeTriggerFlicker(now, links) {
-    if (now < nextFlicker || links.length === 0) return;
-    const flickerPairs = [];
-    const attempts = Math.min(2, links.length);
-    for (let i = 0; i < attempts; i++) {
-      const target = links[Math.floor(Math.random() * links.length)];
-      flickerPairs.push([target.a, target.b]);
+  function updatePulses(now, links) {
+    pulses = pulses.filter((pulse) => pulse.end > now);
+    if (now < nextPulse || links.length === 0) return;
+
+    const available = [...links];
+    const pulseCount = Math.min(3, Math.max(1, Math.floor(Math.random() * 3) + 1, available.length));
+    const duration = randomRange(250, 500);
+    for (let i = 0; i < pulseCount && available.length > 0; i++) {
+      const targetIndex = Math.floor(Math.random() * available.length);
+      const link = available.splice(targetIndex, 1)[0];
+      pulses.push({
+        key: linkKey(link.a, link.b),
+        start: now,
+        end: now + duration,
+      });
     }
-    flicker = { until: now + 300, pairs: flickerPairs };
-    nextFlicker = now + randomRange(10000, 20000);
+
+    nextPulse = now + randomRange(800, 2500);
   }
 
   function render(now) {
@@ -183,8 +205,9 @@
     updateNodes(dt);
 
     const links = buildLinks();
-    maybeTriggerFlicker(now, links);
-    drawLinks(links, now);
+    updatePulses(now, links);
+    const pulseStrength = buildPulseStrength(now);
+    drawLinks(links, now, pulseStrength);
     drawNodes(now);
 
     requestAnimationFrame(render);
