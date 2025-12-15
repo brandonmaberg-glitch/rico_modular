@@ -150,7 +150,7 @@
       const distance = Math.sqrt(link.distSq);
       const fade = Math.max(0, 1 - distance / (Math.min(width, height) * 0.24));
       const pulseFactor = pulseEffects.pulseStrength.get(linkKey(link.a, link.b)) || 0;
-      const alpha = (opacityBase + pulseFactor * 0.12) * fade;
+      const alpha = (opacityBase + pulseFactor * 0.22) * fade;
       if (alpha <= 0) return;
 
       ctx.lineWidth = lineWidth + pulseFactor * 0.9;
@@ -166,7 +166,7 @@
     const pulseSpeed = settings[state]?.pulseSpeed ?? settings.idle.pulseSpeed;
     nodes.forEach((node, index) => {
       const basePulse = 0.12 * Math.sin(now * 0.0014 * pulseSpeed + node.pulseOffset) + 1;
-      const pulseGlow = 1 + (pulseEffects?.nodeStrength?.[index] || 0) * 0.25;
+      const pulseGlow = 1 + (pulseEffects?.nodeStrength?.[index] || 0) * 0.3;
       const r = node.baseRadius * basePulse * pulseGlow;
       const gradient = ctx.createRadialGradient(node.x, node.y, 0, node.x, node.y, r * 1.6);
       gradient.addColorStop(0, 'rgba(255, 173, 94, 0.15)');
