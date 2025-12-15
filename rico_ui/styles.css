@@ -110,8 +110,8 @@ body {
   --outer-opacity-max: 0.94;
   --middle-opacity-min: 0.72;
   --middle-opacity-max: 0.98;
-  --inner-opacity-min: 0.82;
-  --inner-opacity-max: 1;
+  --inner-opacity-min: 0.45;
+  --inner-opacity-max: 0.45;
 }
 
 .core-outer,
@@ -183,7 +183,7 @@ body {
   background: radial-gradient(circle, rgba(255, 140, 50, 0.85), rgba(255, 140, 50, 0.6));
   box-shadow: inset 0 0 30px rgba(0, 0, 0, 0.35);
   animation: throb var(--inner-duration) ease-in-out infinite;
-  opacity: 0.77;
+  opacity: 0.45;
   position: relative;
 }
 
