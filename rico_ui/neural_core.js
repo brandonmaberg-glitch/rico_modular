@@ -16,12 +16,6 @@
   let center = { x: 0, y: 0 };
   let pulses = [];
   let nextPulse = performance.now() + randomRange(2500, 5000);
-  const baseFlowAngle = Math.random() * Math.PI * 2;
-  const baseFlowMagnitude = 0.0045;
-  const baseFlow = {
-    x: Math.cos(baseFlowAngle) * baseFlowMagnitude,
-    y: Math.sin(baseFlowAngle) * baseFlowMagnitude,
-  };
 
   const settings = {
     idle: { pulseSpeed: 0.36, linkOpacity: 0.05 },
@@ -40,14 +34,19 @@
       const r = Math.sqrt(Math.random()) * radius;
       const x = center.x + Math.cos(angle) * r;
       const y = center.y + Math.sin(angle) * r;
+      const swirlDir = Math.random() < 0.5 ? -1 : 1;
       nodes.push({
         x,
         y,
         vx: randomRange(-0.05, 0.05),
         vy: randomRange(-0.05, 0.05),
         flowBias: {
-          x: baseFlow.x * randomRange(0.6, 1.2) + randomRange(-0.0012, 0.0012),
-          y: baseFlow.y * randomRange(0.6, 1.2) + randomRange(-0.0012, 0.0012),
+          swirlDir,
+          swirlStrength: randomRange(0.0035, 0.0055),
+          phase: Math.random() * Math.PI * 2,
+          phaseRate: randomRange(0.8, 1.4),
+          radialJitter: randomRange(0.0007, 0.0014),
+          phaseOffset: Math.random() * Math.PI * 2,
         },
         baseRadius: Math.random() < 0.05 ? randomRange(1.2, 1.6) : randomRange(0.6, 1.2),
         pulseOffset: Math.random() * Math.PI * 2,
@@ -72,22 +71,23 @@
     initializeNodes();
   }
 
-  function gentlyRecenter(node) {
-    const dx = node.x - center.x;
-    const dy = node.y - center.y;
-    const dist = Math.hypot(dx, dy);
-    if (dist > radius) {
-      const pull = (dist - radius) * 0.02;
-      node.vx -= (dx / dist) * pull;
-      node.vy -= (dy / dist) * pull;
-    }
-  }
-
   function updateNodes(dt) {
     const drift = 0.008;
     nodes.forEach((node) => {
-      node.vx += node.flowBias.x * dt;
-      node.vy += node.flowBias.y * dt;
+      const dx = node.x - center.x;
+      const dy = node.y - center.y;
+      const dist = Math.hypot(dx, dy) || 0.0001;
+      const nx = dx / dist;
+      const ny = dy / dist;
+
+      node.flowBias.phase += dt * node.flowBias.phaseRate;
+      const swirlMagnitude = node.flowBias.swirlStrength * (0.9 + 0.25 * Math.sin(node.flowBias.phase));
+      const swirlX = -ny * swirlMagnitude * node.flowBias.swirlDir;
+      const swirlY = nx * swirlMagnitude * node.flowBias.swirlDir;
+      const radialWave = node.flowBias.radialJitter * Math.sin(node.flowBias.phase * 1.35 + node.flowBias.phaseOffset);
+
+      node.vx += swirlX * dt + nx * radialWave * dt;
+      node.vy += swirlY * dt + ny * radialWave * dt;
       node.vx += randomRange(-drift, drift) * dt;
       node.vy += randomRange(-drift, drift) * dt;
       node.vx = Math.max(-0.06, Math.min(0.06, node.vx));
@@ -95,7 +95,25 @@
 
       node.x += node.vx * dt * 60;
       node.y += node.vy * dt * 60;
-      gentlyRecenter(node);
+
+      const dxAfter = node.x - center.x;
+      const dyAfter = node.y - center.y;
+      const distAfter = Math.hypot(dxAfter, dyAfter);
+      const margin = Math.max(2, radius * 0.02);
+      if (distAfter > radius) {
+        const nxAfter = dxAfter / distAfter;
+        const nyAfter = dyAfter / distAfter;
+        const targetDist = Math.max(radius - margin, 0);
+        node.x = center.x + nxAfter * targetDist;
+        node.y = center.y + nyAfter * targetDist;
+
+        const dot = node.vx * nxAfter + node.vy * nyAfter;
+        node.vx -= 2 * dot * nxAfter;
+        node.vy -= 2 * dot * nyAfter;
+
+        node.vx *= 0.92;
+        node.vy *= 0.92;
+      }
     });
   }
 
@@ -133,7 +151,12 @@
     pulses.forEach((pulse) => {
       const progress = Math.min(1, Math.max(0, (now - pulse.start) / (pulse.end - pulse.start)));
       const eased = Math.sin(progress * Math.PI);
-      pulseStrength.set(pulse.key, eased);
+      pulseStrength.set(pulse.key, {
+        strength: eased,
+        progress,
+        phase: pulse.phase,
+        length: pulse.length,
+      });
       nodeStrength[pulse.a] = Math.max(nodeStrength[pulse.a], eased);
       nodeStrength[pulse.b] = Math.max(nodeStrength[pulse.b], eased);
     });
@@ -149,16 +172,48 @@
       const b = nodes[link.b];
       const distance = Math.sqrt(link.distSq);
       const fade = Math.max(0, 1 - distance / (Math.min(width, height) * 0.24));
-      const pulseFactor = pulseEffects.pulseStrength.get(linkKey(link.a, link.b)) || 0;
-      const alpha = (opacityBase + pulseFactor * 0.22) * fade;
+      const pulseEffect = pulseEffects.pulseStrength.get(linkKey(link.a, link.b));
+      const pulseFactor = pulseEffect?.strength || 0;
+      const alpha = (opacityBase + pulseFactor * 0.26) * fade;
       if (alpha <= 0) return;
 
-      ctx.lineWidth = lineWidth + pulseFactor * 0.9;
+      ctx.lineWidth = lineWidth + pulseFactor * 1.05;
       ctx.strokeStyle = `rgba(255, 168, 80, ${alpha.toFixed(3)})`;
       ctx.beginPath();
       ctx.moveTo(a.x, a.y);
       ctx.lineTo(b.x, b.y);
       ctx.stroke();
+
+      if (pulseEffect) {
+        const tBase = (pulseEffect.phase + pulseEffect.progress) % 1;
+        const segmentFraction = pulseEffect.length;
+        const halfLength = segmentFraction * 0.5;
+        const startT = Math.max(0, tBase - halfLength);
+        const endT = Math.min(1, tBase + halfLength);
+        const sparkStrength = 0.35 + pulseFactor * 0.45;
+
+        const gradient = ctx.createLinearGradient(a.x, a.y, b.x, b.y);
+        const midIn = startT + (tBase - startT) * 0.45;
+        const midOut = endT - (endT - tBase) * 0.45;
+        gradient.addColorStop(Math.max(0, startT - 0.05), 'rgba(255, 200, 140, 0)');
+        gradient.addColorStop(startT, 'rgba(255, 200, 140, 0)');
+        gradient.addColorStop(midIn, `rgba(255, 205, 150, ${(sparkStrength * 0.65).toFixed(3)})`);
+        gradient.addColorStop(tBase, `rgba(255, 215, 170, ${sparkStrength.toFixed(3)})`);
+        gradient.addColorStop(midOut, `rgba(255, 205, 150, ${(sparkStrength * 0.65).toFixed(3)})`);
+        gradient.addColorStop(endT, 'rgba(255, 200, 140, 0)');
+        gradient.addColorStop(Math.min(1, endT + 0.05), 'rgba(255, 200, 140, 0)');
+
+        ctx.lineWidth = Math.max(0.65, lineWidth + pulseFactor * 1.2);
+        ctx.strokeStyle = gradient;
+        ctx.beginPath();
+        const sx = a.x + (b.x - a.x) * startT;
+        const sy = a.y + (b.y - a.y) * startT;
+        const ex = a.x + (b.x - a.x) * endT;
+        const ey = a.y + (b.y - a.y) * endT;
+        ctx.moveTo(sx, sy);
+        ctx.lineTo(ex, ey);
+        ctx.stroke();
+      }
     });
   }
 
@@ -166,7 +221,8 @@
     const pulseSpeed = settings[state]?.pulseSpeed ?? settings.idle.pulseSpeed;
     nodes.forEach((node, index) => {
       const basePulse = 0.12 * Math.sin(now * 0.0014 * pulseSpeed + node.pulseOffset) + 1;
-      const pulseGlow = 1 + (pulseEffects?.nodeStrength?.[index] || 0) * 0.3;
+      const nodePulse = pulseEffects?.nodeStrength?.[index] || 0;
+      const pulseGlow = 1 + nodePulse * 0.4;
       const r = node.baseRadius * basePulse * pulseGlow;
       const gradient = ctx.createRadialGradient(node.x, node.y, 0, node.x, node.y, r * 1.6);
       gradient.addColorStop(0, 'rgba(255, 173, 94, 0.15)');
@@ -176,10 +232,21 @@
       ctx.arc(node.x, node.y, r * 1.6, 0, Math.PI * 2);
       ctx.fill();
 
-      ctx.fillStyle = 'rgba(255, 170, 80, 0.18)';
+      ctx.fillStyle = 'rgba(255, 170, 80, 0.2)';
       ctx.beginPath();
       ctx.arc(node.x, node.y, r, 0, Math.PI * 2);
       ctx.fill();
+
+      if (nodePulse > 0) {
+        const highlightR = r * 0.6;
+        const highlight = ctx.createRadialGradient(node.x, node.y, 0, node.x, node.y, highlightR);
+        highlight.addColorStop(0, `rgba(255, 220, 180, ${(0.18 + nodePulse * 0.18).toFixed(3)})`);
+        highlight.addColorStop(1, 'rgba(255, 200, 150, 0)');
+        ctx.fillStyle = highlight;
+        ctx.beginPath();
+        ctx.arc(node.x, node.y, highlightR, 0, Math.PI * 2);
+        ctx.fill();
+      }
     });
   }
 
@@ -201,6 +268,8 @@
         end: now + duration,
         a: link.a,
         b: link.b,
+        phase: Math.random(),
+        length: randomRange(0.1, 0.2),
       });
     }
 
@@ -221,7 +290,8 @@
     lastFrame = now;
 
     ctx.clearRect(0, 0, width, height);
-    const dt = Math.min(delta, 100) / 1000;
+    let dt = Math.min(delta, 100) / 1000;
+    if (dt > 0.05) dt = 0.05;
     updateNodes(dt);
 
     const links = buildLinks();
