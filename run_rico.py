@@ -611,6 +611,135 @@ def _handle_voice_command(command: str, tts_engine: Speaker) -> bool:
     return False
 
 
+def handle_text_interaction(
+    user_text: str,
+    router: CommandRouter,
+    skill_registry: SkillRegistry | None = None,
+    interaction_count: int = 1,
+) -> dict:
+    """Route a single text input through the existing skill pipeline."""
+
+    response = None
+    selected_skill = None
+
+    if skill_registry:
+        try:
+            if is_vague(user_text):
+                last_skill = get_context("last_skill")
+                if last_skill:
+                    selected_skill = skill_registry.get(last_skill)
+                    if selected_skill:
+                        query_text = user_text
+                        if last_skill == "weather":
+                            location_hint = get_context("last_location")
+                            if location_hint:
+                                query_text = location_hint
+                                set_context("last_location", location_hint, ttl_seconds=60)
+                            extractor = getattr(selected_skill, "_extract_location", None)
+                            if callable(extractor):
+                                location_for_context = extractor(query_text)
+                                if location_for_context:
+                                    set_context("last_location", location_for_context, ttl_seconds=60)
+                        response = selected_skill.run(query_text)
+                        set_context("last_skill", last_skill, ttl_seconds=60)
+            if response is None:
+                available_skills = [
+                    {
+                        "name": skill.name or skill.__name__,
+                        "description": getattr(skill, "description", ""),
+                    }
+                    for skill in skill_registry.all()
+                ]
+                if available_skills:
+                    skill_name = select_skill(user_text, available_skills)
+                    selected_skill = skill_registry.get(skill_name)
+                    if selected_skill:
+                        set_context("last_skill", skill_name, ttl_seconds=60)
+                        if skill_name == "weather":
+                            extractor = getattr(selected_skill, "_extract_location", None)
+                            if callable(extractor):
+                                location_for_context = extractor(user_text)
+                                if location_for_context:
+                                    set_context(
+                                        "last_location", location_for_context, ttl_seconds=60
+                                    )
+                        response = selected_skill.run(user_text)
+                    else:
+                        logger.info(
+                            "No matching skill found for '%s'; falling back to conversation.",
+                            skill_name,
+                        )
+                        response = router.skills.get("conversation", router.route)(
+                            user_text
+                        )
+        except Exception as exc:  # pragma: no cover - defensive fallback
+            logger.exception("Skill selection or execution failed: %s", exc)
+
+    if response is None:
+        response = router.route(user_text)
+
+    if interaction_count % 10 == 0:
+        periodic_memory_maintenance()
+        logger.info("Memory maintenance executed.")
+
+    suggested_memory = None
+    should_write_memory = None
+    memory_result = None
+
+    if isinstance(response, dict):
+        suggested_memory = response.get("memory_to_write")
+        should_write_memory = response.get("should_write_memory")
+        # Normalise boolean-like values for memory decisions
+        if should_write_memory in ("true", True, "True", "YES", "Yes"):
+            should_write_memory = "yes"
+        if should_write_memory in ("false", False, "False", "NO", "No"):
+            should_write_memory = "no"
+        memory_result = process_memory_suggestion(
+            {
+                "should_write_memory": should_write_memory,
+                "memory_to_write": suggested_memory,
+            }
+        )
+
+    if isinstance(response, dict):
+        response_text = response.get("response") or response.get("reply") or str(response)
+    else:
+        response_text = str(response)
+
+    from skills.conversation import ConversationSkill
+
+    is_conversation_skill = isinstance(selected_skill, ConversationSkill)
+    if not is_conversation_skill and isinstance(response, dict):
+        if {"memory_to_write", "should_write_memory"}.intersection(response.keys()):
+            is_conversation_skill = True
+
+    if is_conversation_skill:
+        styled_reply = response_text
+    else:
+        styled_reply = style_reply_with_rico(user_text, response_text)
+
+    try:
+        append_conversation_turn(user_text=user_text, assistant_text=styled_reply)
+    except Exception as exc:
+        logger.warning("Failed to append conversation history: %s", exc)
+
+    selected_skill_name = None
+    if selected_skill:
+        selected_skill_name = getattr(selected_skill, "name", None) or getattr(
+            selected_skill, "__name__", None
+        )
+
+    metadata = {
+        "raw_response": response,
+        "selected_skill": selected_skill_name,
+        "memory_result": memory_result,
+        "suggested_memory": suggested_memory,
+        "should_write_memory": should_write_memory,
+    }
+
+    return {"reply": styled_reply, "metadata": metadata}
+
+
 def _run_conversation_loop(
     stt_engine: SpeechToTextEngine,
     tts_engine: Speaker,
@@ -663,110 +792,25 @@ def _run_conversation_loop(
         user_text = text
 
         send_thinking(0.85)
+        interaction_result = handle_text_interaction(
+            user_text=text,
+            router=router,
+            skill_registry=skill_registry,
+            interaction_count=interaction_count,
+        )
 
-        response = None
-        selected_skill = None
-        if skill_registry:
-            try:
-                if is_vague(text):
-                    last_skill = get_context("last_skill")
-                    if last_skill:
-                        selected_skill = skill_registry.get(last_skill)
-                        if selected_skill:
-                            query_text = text
-                            if last_skill == "weather":
-                                location_hint = get_context("last_location")
-                                if location_hint:
-                                    query_text = location_hint
-                                    set_context("last_location", location_hint, ttl_seconds=60)
-                                extractor = getattr(selected_skill, "_extract_location", None)
-                                if callable(extractor):
-                                    location_for_context = extractor(query_text)
-                                    if location_for_context:
-                                        set_context(
-                                            "last_location", location_for_context, ttl_seconds=60
-                                        )
-                            response = selected_skill.run(query_text)
-                            set_context("last_skill", last_skill, ttl_seconds=60)
-                if response is None:
-                    available_skills = [
-                        {
-                            "name": skill.name or skill.__name__,
-                            "description": getattr(skill, "description", ""),
-                        }
-                        for skill in skill_registry.all()
-                    ]
-                    if available_skills:
-                        skill_name = select_skill(text, available_skills)
-                        selected_skill = skill_registry.get(skill_name)
-                        if selected_skill:
-                            set_context("last_skill", skill_name, ttl_seconds=60)
-                            if skill_name == "weather":
-                                extractor = getattr(selected_skill, "_extract_location", None)
-                                if callable(extractor):
-                                    location_for_context = extractor(text)
-                                    if location_for_context:
-                                        set_context(
-                                            "last_location", location_for_context, ttl_seconds=60
-                                        )
-                            response = selected_skill.run(text)
-                        else:
-                            logger.info(
-                                "No matching skill found for '%s'; falling back to conversation.",
-                                skill_name,
-                            )
-                            response = router.skills.get("conversation", router.route)(text)
-            except Exception as exc:  # pragma: no cover - defensive fallback
-                logger.exception("Skill selection or execution failed: %s", exc)
-
-        if response is None:
-            response = router.route(text)
-
-        if interaction_count % 10 == 0:
-            periodic_memory_maintenance()
-            logger.info("Memory maintenance executed.")
-        suggested_memory = None
-        should_write_memory = None
-        memory_result = None
-        if isinstance(response, dict):
-            suggested_memory = response.get("memory_to_write")
-            should_write_memory = response.get("should_write_memory")
-            # Normalise boolean-like values for memory decisions
-            if should_write_memory in ("true", True, "True", "YES", "Yes"):
-                should_write_memory = "yes"
-            if should_write_memory in ("false", False, "False", "NO", "No"):
-                should_write_memory = "no"
-            memory_result = process_memory_suggestion(
-                {
-                    "should_write_memory": should_write_memory,
-                    "memory_to_write": suggested_memory,
-                }
-            )
-        if isinstance(response, dict):
-            response_text = response.get("response") or response.get("reply") or str(response)
-        else:
-            response_text = str(response)
-
-        from skills.conversation import ConversationSkill
-
-        is_conversation_skill = isinstance(selected_skill, ConversationSkill)
-        if not is_conversation_skill and isinstance(response, dict):
-            if {"memory_to_write", "should_write_memory"}.intersection(response.keys()):
-                is_conversation_skill = True
-
-        if is_conversation_skill:
-            styled_reply = response_text
-        else:
-            styled_reply = style_reply_with_rico(user_text, response_text)
+        metadata = interaction_result.get("metadata", {}) or {}
+        styled_reply = interaction_result.get("reply") or ""
+        response = metadata.get("raw_response")
+        memory_result = metadata.get("memory_result")
+        suggested_memory = metadata.get("suggested_memory")
+        should_write_memory = metadata.get("should_write_memory")
 
         logger.info("Skill response: %s", response)
         send_thinking(0.0)
         send_reply(styled_reply)
         tts_engine.speak(styled_reply)
-        try:
-            append_conversation_turn(user_text=user_text, assistant_text=styled_reply)
-        except Exception as exc:
-            logger.warning("Failed to append conversation history: %s", exc)
+
         if memory_result is True:
             logger.info("Memory saved.")
         elif memory_result == "ask" and suggested_memory:
