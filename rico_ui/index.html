@@ -30,6 +30,9 @@
           <div class="core-inner"></div>
         </div>
         <form class="core-input" id="core-form">
+          <button type="button" id="mic-button" class="mic-button" aria-label="Hold to record">
+            <span aria-hidden="true">🎤</span>
+          </button>
           <input type="text" id="prompt" name="prompt" autocomplete="off" placeholder="Ask anything…" aria-label="Command input">
         </form>
       </section>
@@ -44,6 +47,9 @@
 
     <section class="console-log" id="console-log" aria-live="polite" aria-label="Conversation log"></section>
   </div>
+
+  <button type="button" id="enable-audio" class="enable-audio hidden">Enable audio</button>
+  <audio id="ricoAudio" aria-hidden="true"></audio>
 
   <script src="state_controller.js"></script>
   <script src="neural_core.js"></script>

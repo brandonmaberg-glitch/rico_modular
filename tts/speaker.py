@@ -89,6 +89,27 @@ class Speaker:
         send_provider(self._provider)
         return True
 
+    def synthesize(self, text: str) -> Optional[tuple[bytes, str]]:
+        """Generate speech audio without playback and return bytes plus suffix."""
+
+        if not text:
+            logger.warning("No text provided for speech synthesis.")
+            return None
+
+        audio_bytes: Optional[bytes] = None
+        suffix = ".mp3"
+
+        if self._provider == "openai":
+            audio_bytes = self._speak_openai(text)
+            suffix = ".wav"
+        elif self._provider == "elevenlabs":
+            audio_bytes = self._speak_elevenlabs(text)
+
+        if not audio_bytes:
+            return None
+
+        return audio_bytes, suffix
+
     def speak(self, text: str) -> None:
         """Convert text to speech and play the audio synchronously."""
         if not text:
