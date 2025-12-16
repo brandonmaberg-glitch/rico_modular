@@ -1,25 +1,18 @@
 const coreEl = document.getElementById('core');
-const stateIndicator = document.getElementById('state-indicator');
 const promptInput = document.getElementById('prompt');
 const form = document.getElementById('core-form');
 
-/**
- * Centralized state setter for the core pulse.
- * Available states: `idle`, `thinking`, `listening`.
- */
 function setCoreState(nextState) {
-  coreEl.dataset.state = nextState;
-  stateIndicator.textContent = nextState.charAt(0).toUpperCase() + nextState.slice(1);
-  if (window.neuralCoreController?.setState) {
-    window.neuralCoreController.setState(nextState);
-  }
+  window.coreStateController?.setCoreState(nextState);
 }
 
-// Start in idle mode with a slow breathing pulse.
+// Initialize in idle state.
 setCoreState('idle');
 
-// Mock thinking cycle: when the user submits a prompt, speed up the pulse
-// to signal processing, then return to idle after a delay.
+function simulateToolDetection(text) {
+  return /(weather|search)/i.test(text);
+}
+
 form.addEventListener('submit', (event) => {
   event.preventDefault();
   const value = promptInput.value.trim();
@@ -28,7 +21,10 @@ form.addEventListener('submit', (event) => {
   setCoreState('thinking');
   promptInput.setAttribute('aria-busy', 'true');
 
-  // Simulated tool response placeholder
+  if (simulateToolDetection(value)) {
+    setTimeout(() => setCoreState('tool'), 200);
+  }
+
   setTimeout(() => {
     promptInput.value = '';
     promptInput.removeAttribute('aria-busy');
@@ -36,9 +32,13 @@ form.addEventListener('submit', (event) => {
   }, 1600);
 });
 
-// When the input regains focus, ensure the core is calm unless it is thinking.
+// When the input regains focus, ensure the core is calm unless it is already processing.
 promptInput.addEventListener('focus', () => {
   if (coreEl.dataset.state !== 'thinking') {
     setCoreState('idle');
   }
 });
+
+// Placeholder hooks for microphone lifecycle.
+document.addEventListener('rico-voice-start', () => setCoreState('listening'));
+document.addEventListener('rico-voice-end', () => setCoreState('idle'));
