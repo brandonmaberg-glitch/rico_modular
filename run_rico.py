@@ -22,6 +22,8 @@ from memory.memory_manager import (
     process_memory_suggestion,
     set_context,
 )
+from rico.app import RicoApp
+from rico.app_context import AppContext, get_app_context
 from router.command_router import CommandRouter
 from skills import car_info, system_status, web_search
 from stt.base import SpeechToTextEngine, TranscriptionResult
@@ -459,30 +461,18 @@ def build_skill_registry(config: AppConfig):
 
 
 def main() -> None:
-    """Start the assistant."""
+    """Start the assistant with the shared application context."""
+
     global logger
-    config = AppConfig.load()
-    logger = setup_logger()
+    context = get_app_context()
+    logger = context.logger
     logger.info("Initialising RICO...")
 
     start_ui_server()
     launch_ui()
 
+    rico_app = RicoApp(context)
     wake_engine = WakeWordEngine()
-    stt_engine = SpeechToTextEngine(
-        config.openai_api_key,
-        voice_enabled=config.voice_enabled,
-        voice_key=config.voice_key,
-        voice_sample_rate=config.voice_sample_rate,
-        voice_max_seconds=config.voice_max_seconds,
-    )
-    tts_engine = Speaker(
-        openai_api_key=config.openai_api_key,
-        elevenlabs_api_key=config.elevenlabs_api_key,
-        voice_id=config.elevenlabs_voice_id,
-    )
-    skill_registry, skills = build_skill_registry(config)
-    router = CommandRouter(skills)
 
     logger.info("RICO is online. Awaiting your command, Sir.")
 
@@ -495,18 +485,16 @@ def main() -> None:
             logger.info("Wakeword detected. Entering conversation mode...")
             clear_conversation_history()
             _run_conversation_loop(
-                stt_engine=stt_engine,
-                tts_engine=tts_engine,
-                router=router,
+                rico_app=rico_app,
+                context=context,
                 silence_timeout=20.0,
-                skill_registry=skill_registry,
             )
         except KeyboardInterrupt:
             logger.info("Keyboard interrupt received. Exiting gracefully.")
             break
         except Exception as exc:  # pragma: no cover - defensive guard
             logger.exception("Unexpected error: %s", exc)
-            tts_engine.speak(
+            context.tts_engine.speak(
                 "Apologies Sir, an error occurred but I remain attentive."
             )
 
@@ -741,30 +729,26 @@ def handle_text_interaction(
 
 
 def _run_conversation_loop(
-    stt_engine: SpeechToTextEngine,
-    tts_engine: Speaker,
-    router: CommandRouter,
+    rico_app: RicoApp,
+    context: AppContext,
     silence_timeout: float,
-    skill_registry: SkillRegistry | None = None,
 ) -> None:
     """Maintain an active conversation until an exit condition is met."""
 
-    interaction_count = 0
     while True:
         send_listening(True)
-        transcription = stt_engine.transcribe(timeout=silence_timeout)
+        transcription = context.stt_engine.transcribe(timeout=silence_timeout)
         if isinstance(transcription, TranscriptionResult):
             result = transcription
         else:  # pragma: no cover - defensive for legacy return
             result = TranscriptionResult(text=str(transcription), timed_out=False)
 
-        interaction_count += 1
         if result.timed_out:
             logger.info(
                 "Silence timeout reached after %.0f seconds; exiting conversation mode.",
                 silence_timeout,
             )
-            tts_engine.speak("Very well, Sir.")
+            context.tts_engine.speak("Very well, Sir.")
             send_listening(False)
             break
 
@@ -774,33 +758,19 @@ def _run_conversation_loop(
 
         if not text:
             logger.warning("No speech detected.")
-            tts_engine.speak("I am terribly sorry Sir, I did not catch that.")
+            context.tts_engine.speak("I am terribly sorry Sir, I did not catch that.")
             continue
 
-        normalised = _normalise_command(text)
-
-        if normalised.startswith("voice"):
-            if _handle_voice_command(normalised, tts_engine):
-                continue
-
-        if _should_exit(text):
+        send_thinking(0.85)
+        interaction_result = rico_app.handle_text(text, source="cli")
+        if interaction_result.metadata.get("exit"):
             logger.info("Exit phrase detected; ending conversation mode.")
-            tts_engine.speak("Very well, Sir.")
+            context.tts_engine.speak("Very well, Sir.")
             send_listening(False)
             break
 
-        user_text = text
-
-        send_thinking(0.85)
-        interaction_result = handle_text_interaction(
-            user_text=text,
-            router=router,
-            skill_registry=skill_registry,
-            interaction_count=interaction_count,
-        )
-
-        metadata = interaction_result.get("metadata", {}) or {}
-        styled_reply = interaction_result.get("reply") or ""
+        metadata = interaction_result.metadata or {}
+        styled_reply = interaction_result.reply or ""
         response = metadata.get("raw_response")
         memory_result = metadata.get("memory_result")
         suggested_memory = metadata.get("suggested_memory")
@@ -809,14 +779,14 @@ def _run_conversation_loop(
         logger.info("Skill response: %s", response)
         send_thinking(0.0)
         send_reply(styled_reply)
-        tts_engine.speak(styled_reply)
+        context.tts_engine.speak(styled_reply)
 
         if memory_result is True:
             logger.info("Memory saved.")
         elif memory_result == "ask" and suggested_memory:
-            tts_engine.speak("Shall I remember that, Sir?")
+            context.tts_engine.speak("Shall I remember that, Sir?")
             send_listening(True)
-            confirmation = stt_engine.transcribe(timeout=silence_timeout)
+            confirmation = context.stt_engine.transcribe(timeout=silence_timeout)
             send_listening(False)
             if isinstance(confirmation, TranscriptionResult):
                 confirmation_text = confirmation.text
