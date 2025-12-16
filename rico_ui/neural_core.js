@@ -12,15 +12,19 @@
   let dpr = window.devicePixelRatio || 1;
   let lastFrame = 0;
   let visible = !document.hidden;
-  let state = 'idle';
   let center = { x: 0, y: 0 };
   let pulses = [];
-  let nextPulse = performance.now() + randomRange(2500, 5000);
+  let nextPulse = performance.now();
 
-  const settings = {
-    idle: { pulseSpeed: 0.36, linkOpacity: 0.05 },
-    thinking: { pulseSpeed: 0.52, linkOpacity: 0.08 },
-    listening: { pulseSpeed: 0.52, linkOpacity: 0.08 },
+  const renderConfig = window.coreStateController?.renderConfig || {
+    linkAlphaBase: 0.05,
+    pulseOpacityBoost: 0.26,
+    pulseEndpointBoost: 0.18,
+    pulseIntervalMinMs: 2500,
+    pulseIntervalMaxMs: 5000,
+    flowBiasStrength: 1,
+    nodeSpeedMultiplier: 1,
+    css: {},
   };
 
   function randomRange(min, max) {
@@ -69,9 +73,14 @@
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
     initializeNodes();
+    const minInterval = Math.max(300, renderConfig.pulseIntervalMinMs ?? 2500);
+    const maxInterval = Math.max(minInterval + 300, renderConfig.pulseIntervalMaxMs ?? 5000);
+    nextPulse = performance.now() + randomRange(minInterval, maxInterval);
   }
 
   function updateNodes(dt) {
+    const flowScale = renderConfig.flowBiasStrength ?? 1;
+    const speedMultiplier = renderConfig.nodeSpeedMultiplier ?? 1;
     const drift = 0.008;
     nodes.forEach((node) => {
       const dx = node.x - center.x;
@@ -81,7 +90,7 @@
       const ny = dy / dist;
 
       node.flowBias.phase += dt * node.flowBias.phaseRate;
-      const swirlMagnitude = node.flowBias.swirlStrength * (0.9 + 0.25 * Math.sin(node.flowBias.phase));
+      const swirlMagnitude = node.flowBias.swirlStrength * (0.9 + 0.25 * Math.sin(node.flowBias.phase)) * flowScale;
       const swirlX = -ny * swirlMagnitude * node.flowBias.swirlDir;
       const swirlY = nx * swirlMagnitude * node.flowBias.swirlDir;
       const radialWave = node.flowBias.radialJitter * Math.sin(node.flowBias.phase * 1.35 + node.flowBias.phaseOffset);
@@ -93,8 +102,8 @@
       node.vx = Math.max(-0.06, Math.min(0.06, node.vx));
       node.vy = Math.max(-0.06, Math.min(0.06, node.vy));
 
-      node.x += node.vx * dt * 60;
-      node.y += node.vy * dt * 60;
+      node.x += node.vx * dt * 60 * speedMultiplier;
+      node.y += node.vy * dt * 60 * speedMultiplier;
 
       const dxAfter = node.x - center.x;
       const dyAfter = node.y - center.y;
@@ -164,7 +173,7 @@
   }
 
   function drawLinks(links, now, pulseEffects) {
-    const opacityBase = settings[state]?.linkOpacity ?? settings.idle.linkOpacity;
+    const opacityBase = renderConfig.linkAlphaBase ?? 0.05;
     const lineWidth = 0.45;
 
     links.forEach((link) => {
@@ -174,7 +183,7 @@
       const fade = Math.max(0, 1 - distance / (Math.min(width, height) * 0.24));
       const pulseEffect = pulseEffects.pulseStrength.get(linkKey(link.a, link.b));
       const pulseFactor = pulseEffect?.strength || 0;
-      const alpha = (opacityBase + pulseFactor * 0.26) * fade;
+      const alpha = (opacityBase + pulseFactor * (renderConfig.pulseOpacityBoost ?? 0.26)) * fade;
       if (alpha <= 0) return;
 
       ctx.lineWidth = lineWidth + pulseFactor * 1.05;
@@ -190,7 +199,7 @@
         const halfLength = segmentFraction * 0.5;
         const startT = Math.max(0, tBase - halfLength);
         const endT = Math.min(1, tBase + halfLength);
-        const sparkStrength = 0.35 + pulseFactor * 0.45;
+        const sparkStrength = 0.35 + pulseFactor * (0.3 + (renderConfig.pulseOpacityBoost ?? 0.26) * 0.5);
 
         const gradient = ctx.createLinearGradient(a.x, a.y, b.x, b.y);
         const midIn = startT + (tBase - startT) * 0.45;
@@ -218,11 +227,11 @@
   }
 
   function drawNodes(now, pulseEffects) {
-    const pulseSpeed = settings[state]?.pulseSpeed ?? settings.idle.pulseSpeed;
+    const pulseSpeed = 0.36 + (renderConfig.nodeSpeedMultiplier ? (renderConfig.nodeSpeedMultiplier - 1) * 0.25 : 0);
     nodes.forEach((node, index) => {
       const basePulse = 0.12 * Math.sin(now * 0.0014 * pulseSpeed + node.pulseOffset) + 1;
       const nodePulse = pulseEffects?.nodeStrength?.[index] || 0;
-      const pulseGlow = 1 + nodePulse * 0.4;
+      const pulseGlow = 1 + nodePulse * (renderConfig.pulseEndpointBoost ?? 0.18) * 1.5;
       const r = node.baseRadius * basePulse * pulseGlow;
       const gradient = ctx.createRadialGradient(node.x, node.y, 0, node.x, node.y, r * 1.6);
       gradient.addColorStop(0, 'rgba(255, 173, 94, 0.15)');
@@ -240,7 +249,9 @@
       if (nodePulse > 0) {
         const highlightR = r * 0.6;
         const highlight = ctx.createRadialGradient(node.x, node.y, 0, node.x, node.y, highlightR);
-        highlight.addColorStop(0, `rgba(255, 220, 180, ${(0.18 + nodePulse * 0.18).toFixed(3)})`);
+        const endpointBoost = renderConfig.pulseEndpointBoost ?? 0.18;
+        const highlightAlpha = endpointBoost * (1 + nodePulse);
+        highlight.addColorStop(0, `rgba(255, 220, 180, ${highlightAlpha.toFixed(3)})`);
         highlight.addColorStop(1, 'rgba(255, 200, 150, 0)');
         ctx.fillStyle = highlight;
         ctx.beginPath();
@@ -273,7 +284,9 @@
       });
     }
 
-    nextPulse = now + randomRange(2500, 5000);
+    const minInterval = Math.max(300, renderConfig.pulseIntervalMinMs ?? 2500);
+    const maxInterval = Math.max(minInterval + 300, renderConfig.pulseIntervalMaxMs ?? 5000);
+    nextPulse = now + randomRange(minInterval, maxInterval);
   }
 
   function render(now) {
@@ -307,8 +320,8 @@
     visible = !document.hidden;
   }
 
-  function setState(nextState) {
-    state = nextState;
+  function handleStateChange() {
+    nextPulse = performance.now();
   }
 
   resize();
@@ -319,5 +332,5 @@
     render(time);
   });
 
-  window.neuralCoreController = { setState };
+  window.neuralCoreController = { onStateChange: handleStateChange };
 })();

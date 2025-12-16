@@ -7,7 +7,10 @@
   --glass: rgba(255, 140, 50, 0.12);
   --ring-soft: rgba(255, 140, 50, 0.35);
   --blur: 32px;
-  --shadow: 0 0 24px rgba(255, 140, 50, 0.45), 0 0 120px rgba(255, 140, 50, 0.22);
+  --core-breathe-duration: 6.4;
+  --core-glow-mult: 1;
+  --ring-drift-speed: 62;
+  --shadow: 0 0 calc(24px * var(--core-glow-mult)) rgba(255, 140, 50, 0.45), 0 0 calc(120px * var(--core-glow-mult)) rgba(255, 140, 50, 0.22);
   font-family: 'Space Grotesk', 'Inter', system-ui, -apple-system, sans-serif;
   color: var(--text);
   background-color: var(--bg);
@@ -100,12 +103,12 @@ body {
   position: relative;
   width: min(520px, 80vw);
   aspect-ratio: 1 / 1;
-  filter: drop-shadow(0 0 36px rgba(255, 140, 50, 0.35));
+  filter: drop-shadow(0 0 calc(36px * var(--core-glow-mult)) rgba(255, 140, 50, 0.35));
   overflow: hidden;
   border-radius: 50%;
-  --outer-duration: 6.4s;
-  --middle-duration: 5.8s;
-  --inner-duration: 7.1s;
+  --outer-duration: calc(var(--core-breathe-duration) * 1s);
+  --middle-duration: calc(var(--core-breathe-duration) * 0.91s);
+  --inner-duration: calc(var(--core-breathe-duration) * 1.11s);
   --outer-opacity-min: 0.76;
   --outer-opacity-max: 0.94;
   --middle-opacity-min: 0.72;
@@ -150,7 +153,7 @@ body {
   background: conic-gradient(from 180deg, rgba(255, 140, 50, 0.05), rgba(255, 140, 50, 0.02), rgba(255, 178, 90, 0.05), rgba(255, 140, 50, 0.03));
   mix-blend-mode: screen;
   filter: blur(1px);
-  animation: drift 62s linear infinite;
+  animation: drift calc(var(--ring-drift-speed) * 1s) linear infinite;
   opacity: 0.28;
   pointer-events: none;
 }
@@ -274,26 +277,6 @@ body {
 }
 
 /* Animation speeds adjust via data-state */
-.core[data-state="idle"] .core-outer { animation-duration: 5s; }
-.core[data-state="idle"] .core-middle { animation-duration: 4s; }
-.core[data-state="idle"] .core-inner { animation-duration: 2.2s; }
-
-.core[data-state="idle"] {
-  --outer-duration: 6.4s;
-  --middle-duration: 5.8s;
-  --inner-duration: 7.1s;
-}
-
-.core[data-state="thinking"] .core-outer { animation-duration: 2.6s; }
-.core[data-state="thinking"] .core-middle { animation-duration: 2.3s; }
-.core[data-state="thinking"] .core-inner { animation-duration: 1.4s; }
-
-.core[data-state="thinking"] {
-  --outer-duration: 2.8s;
-  --middle-duration: 2.5s;
-  --inner-duration: 1.6s;
-}
-
 @keyframes pulse-slow {
   0%, 100% { transform: scale(0.96); opacity: var(--opacity-min, 0.8); }
   50% { transform: scale(1.04); opacity: var(--opacity-max, 1); }
