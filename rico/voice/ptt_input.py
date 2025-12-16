@@ -39,6 +39,37 @@ def _wait_for_enter_or_timeout(max_seconds: int) -> bool:
             return True
 
 
+def _write_wav(
+    frames: list[np.ndarray],
+    *,
+    channels: int,
+    sample_rate: int,
+    output_path: str,
+) -> bool:
+    """Persist the recorded frames to disk.
+
+    Returns True on success to allow callers to gate logging and metadata.
+    """
+
+    try:
+        import soundfile as sf  # type: ignore
+    except Exception:
+        print(
+            "Audio libraries not found. Install them with: pip install sounddevice soundfile"
+        )
+        return False
+
+    try:
+        recording = np.concatenate(frames, axis=0) if frames else np.empty((0, channels))
+        sf.write(output_path, recording, sample_rate)
+    except Exception as exc:  # pragma: no cover - filesystem dependent
+        logger.error("Failed to write recording: %s", exc)
+        print(f"Failed to save recording: {exc}")
+        return False
+
+    return True
+
+
 def record_to_wav(
     *,
     sample_rate: int = 16000,
@@ -50,7 +81,6 @@ def record_to_wav(
 
     try:
         import sounddevice as sd  # type: ignore
-        import soundfile as sf  # type: ignore
     except Exception:
         print(
             "Audio libraries not found. Install them with: pip install sounddevice soundfile"
@@ -91,12 +121,7 @@ def record_to_wav(
     else:
         logger.info("Stopping recording after %.2f seconds (timeout)", duration)
 
-    try:
-        recording = np.concatenate(frames, axis=0) if frames else np.empty((0, channels))
-        sf.write(output_path, recording, sample_rate)
-    except Exception as exc:  # pragma: no cover - filesystem dependent
-        logger.error("Failed to write recording: %s", exc)
-        print(f"Failed to save recording: {exc}")
+    if not _write_wav(frames, channels=channels, sample_rate=sample_rate, output_path=output_path):
         return None
 
     print(f"Stopped. Saved: {output_path} ({duration:.1f}s)")
@@ -104,4 +129,55 @@ def record_to_wav(
     return output_path
 
 
-__all__ = ["record_to_wav"]
+def record_to_wav_timed(
+    *,
+    sample_rate: int = 16000,
+    max_seconds: int = 20,
+    channels: int = 1,
+    output_path: str = "./tmp/input.wav",
+) -> Optional[tuple[str, float]]:
+    """Record audio for a fixed duration without waiting for stdin input."""
+
+    try:
+        import sounddevice as sd  # type: ignore
+    except Exception:
+        logger.error(
+            "Audio libraries not found. Install them with: pip install sounddevice soundfile"
+        )
+        return None
+
+    os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
+
+    frames = []
+
+    def _callback(indata, _frames, _time, status):
+        if status:  # pragma: no cover - passthrough from sounddevice
+            logger.warning("Recording status: %s", status)
+        frames.append(indata.copy())
+
+    logger.info("Starting timed recording: %s", output_path)
+    start_time = time.time()
+
+    try:
+        with sd.InputStream(
+            samplerate=sample_rate,
+            channels=channels,
+            dtype="float32",
+            callback=_callback,
+        ):
+            sd.sleep(int(max_seconds * 1000))
+    except Exception as exc:  # pragma: no cover - hardware dependent
+        logger.error("Recording failed: %s", exc)
+        return None
+
+    duration = time.time() - start_time
+    logger.info("Timed recording finished after %.2f seconds", duration)
+
+    if not _write_wav(frames, channels=channels, sample_rate=sample_rate, output_path=output_path):
+        return None
+
+    logger.info("Saved timed recording to %s (%.2fs)", output_path, duration)
+    return output_path, duration
+
+
+__all__ = ["record_to_wav", "record_to_wav_timed"]
