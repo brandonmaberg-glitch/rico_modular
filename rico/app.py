@@ -6,9 +6,10 @@ import os
 from dataclasses import dataclass
 
 from rico.app_context import AppContext
+from rico.commands import _handle_voice_command, _normalise_command, _should_exit
+from rico.processing import handle_text_interaction
 from rico.voice.ptt_input import record_to_wav
 from rico.voice.transcribe import transcribe_wav
-from run_rico import _handle_voice_command, _normalise_command, _should_exit, handle_text_interaction
 
 
 @dataclass
