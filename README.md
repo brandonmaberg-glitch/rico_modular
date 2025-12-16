@@ -71,6 +71,17 @@ transcribe the audio and process it through the same pipeline as typed input.
 
 All interactions are logged to `logs/rico.log` for auditing.
 
+### Running the web UI
+
+Serve the browser UI and chat endpoint locally:
+
+```
+python run_rico_web.py
+```
+
+Then open [http://127.0.0.1:8000/](http://127.0.0.1:8000/) in your browser to
+chat with RICO via the web interface.
+
 ## Extending Skills
 Create a new module inside `skills/` with an `activate(text: str) -> str` function and
 register it inside `run_rico.build_skill_registry`. The router can be updated to pattern
