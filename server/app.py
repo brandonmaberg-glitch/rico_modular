@@ -7,14 +7,19 @@ from pathlib import Path
 
 import logging
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Body, FastAPI, HTTPException
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from rico.app import RicoApp
-from ui_bridge import is_speaking
 from rico.app_context import get_app_context
+from rico.conversation.orchestrator import (
+    DEFAULT_MANUAL_TIMEOUT_MS,
+    process_text_turn,
+    process_voice_turn,
+)
+from ui_bridge import is_speaking
 
 
 UI_DIR = Path(__file__).resolve().parent.parent / "rico_ui"
@@ -52,14 +57,26 @@ class ChatRequest(BaseModel):
 
 
 class ChatResponse(BaseModel):
+    text: str
     reply: str
+    replied: bool
+    should_followup: bool
+    followup_timeout_ms: int
     metadata: dict | None = None
     audio_url: str | None = None
+
+
+class VoiceRequest(BaseModel):
+    mode: str = "manual"
+    timeout_ms: int = DEFAULT_MANUAL_TIMEOUT_MS
 
 
 class VoiceResponse(BaseModel):
     text: str
     reply: str
+    replied: bool
+    should_followup: bool
+    followup_timeout_ms: int
     metadata: dict | None = None
     audio_url: str | None = None
 
@@ -69,16 +86,24 @@ async def chat(request: ChatRequest) -> ChatResponse:
     if not request.text.strip():
         raise HTTPException(status_code=400, detail="Text is required.")
 
-    result = rico_app.handle_text(request.text, source="web")
-    reply = result.reply or ""
-    metadata = result.metadata or {}
+    turn = process_text_turn(rico_app, context, request.text, source="web")
+    reply = turn.reply or ""
+    metadata = turn.metadata or {}
     audio_url = _build_audio_file(reply)
 
-    return ChatResponse(reply=reply, metadata=metadata, audio_url=audio_url)
+    return ChatResponse(
+        text=turn.transcript,
+        reply=reply,
+        replied=turn.replied,
+        should_followup=turn.should_followup,
+        followup_timeout_ms=turn.followup_timeout_ms,
+        metadata=metadata,
+        audio_url=audio_url,
+    )
 
 
 @app.post("/api/voice_ptt", response_model=VoiceResponse)
-async def voice_ptt() -> VoiceResponse:
+async def voice_ptt(request: VoiceRequest = Body(default_factory=VoiceRequest)) -> VoiceResponse:
     logger.info("voice_ptt: ENTER endpoint")
     if is_speaking():
         raise HTTPException(
@@ -86,19 +111,23 @@ async def voice_ptt() -> VoiceResponse:
             detail="RICO is speaking right now. Please wait for playback to finish.",
         )
     try:
-        logger.info("voice_ptt: starting audio recording (VAD)")
-        result = rico_app.handle_voice_ptt(source="web")
         logger.info(
-            "voice_ptt: record_to_wav_vad returned wav_path=%r", result.wav_path
+            "voice_ptt: starting audio recording (VAD) mode=%s timeout_ms=%d",
+            request.mode,
+            request.timeout_ms,
         )
-        if result.wav_path is None:
-            logger.warning("voice_ptt: NO AUDIO CAPTURED (wav_path is None)")
-        logger.info("voice_ptt: starting transcription")
-        transcription = result.text or ""
+        turn = process_voice_turn(
+            rico_app,
+            context,
+            mode=request.mode,
+            timeout_ms=request.timeout_ms,
+            source="web",
+        )
+        transcription = turn.transcript or ""
         logger.info("voice_ptt: transcription result=%r", transcription)
         logger.info("voice_ptt: sending text to RICO handler")
-        reply = result.reply or ""
-        metadata = result.metadata or {}
+        reply = turn.reply or ""
+        metadata = turn.metadata or {}
 
         logger.info(
             "voice_ptt: reply_len=%d reply_preview=%r",
@@ -130,6 +159,9 @@ async def voice_ptt() -> VoiceResponse:
         return VoiceResponse(
             text=transcription,
             reply=reply,
+            replied=turn.replied,
+            should_followup=turn.should_followup,
+            followup_timeout_ms=turn.followup_timeout_ms,
             metadata=metadata,
             audio_url=audio_url,
         )

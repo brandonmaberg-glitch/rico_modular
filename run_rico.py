@@ -4,7 +4,6 @@ from __future__ import annotations
 import json
 import logging
 import os
-import re
 
 import conversation
 import core.skill_loader as SkillLoader
@@ -25,6 +24,10 @@ from memory.memory_manager import (
 from rico.app import RicoApp
 from rico.app_context import AppContext, get_app_context
 from rico.commands import _handle_voice_command, _normalise_command, _should_exit
+from rico.conversation.orchestrator import (
+    DEFAULT_MANUAL_TIMEOUT_MS,
+    process_voice_turn,
+)
 from rico.processing import handle_text_interaction
 from router.command_router import CommandRouter
 from skills import car_info, system_status, web_search
@@ -43,62 +46,6 @@ from wakeword.engine import WakeWordEngine
 
 logger = logging.getLogger("RICO")
 
-
-ACKNOWLEDGEMENT_PHRASES = {
-    "ok",
-    "okay",
-    "yeah",
-    "yep",
-    "nah",
-    "nice",
-    "cool",
-    "cheers",
-    "thanks",
-    "thank you",
-    "lol",
-    "haha",
-    "alright",
-    "sound",
-    "safe",
-    "right",
-}
-
-QUESTION_STARTERS = (
-    "what",
-    "why",
-    "how",
-    "when",
-    "where",
-    "who",
-    "can",
-    "could",
-    "should",
-    "would",
-    "do",
-    "did",
-    "is",
-    "are",
-)
-
-
-def should_respond(text: str) -> bool:
-    """Return True when a reply is warranted for the provided text."""
-
-    if not text or not text.strip():
-        return False
-
-    normalized = re.sub(r"\s+", " ", text).strip().lower()
-    if normalized in ACKNOWLEDGEMENT_PHRASES:
-        return False
-
-    words = re.findall(r"\b\w+\b", normalized)
-    if len(words) <= 2 and "?" not in text:
-        return False
-
-    if "?" in text:
-        return True
-
-    return re.match(rf"^({'|'.join(QUESTION_STARTERS)})\b", normalized) is not None
 
 
 def _parse_response_output(completion: object) -> dict | None:
@@ -484,51 +431,47 @@ def _run_conversation_loop(
 ) -> None:
     """Maintain an active conversation until an exit condition is met."""
 
-    followup_timeout_sec = 6.0
-    second_chance_timeout_sec = 3.0
-    pending_text: str | None = None
+    mode = "manual"
+    timeout_ms = int(silence_timeout * 1000)
 
     while True:
-        if pending_text is None:
-            send_listening(True)
-            transcription = context.stt_engine.transcribe(timeout=silence_timeout)
-            if isinstance(transcription, TranscriptionResult):
-                result = transcription
-            else:  # pragma: no cover - defensive for legacy return
-                result = TranscriptionResult(text=str(transcription), timed_out=False)
+        send_listening(True)
+        turn = process_voice_turn(
+            rico_app,
+            context,
+            mode=mode,
+            timeout_ms=timeout_ms or DEFAULT_MANUAL_TIMEOUT_MS,
+            source="cli",
+        )
+        send_listening(False)
 
-            if result.timed_out:
-                logger.info(
-                    "Silence timeout reached after %.0f seconds; exiting conversation mode.",
-                    silence_timeout,
-                )
-                context.tts_engine.speak("Very well, Sir.")
-                send_listening(False)
-                break
-
-            text = result.text.strip()
-        else:
-            text = pending_text.strip()
-            pending_text = None
-
-        logger.info("Transcription: %s", text)
-        send_transcription(text)
-
-        if not text:
-            logger.warning("No speech detected.")
-            context.tts_engine.speak("I am terribly sorry Sir, I did not catch that.")
-            continue
-
-        send_thinking(0.85)
-        interaction_result = rico_app.handle_text(text, source="cli")
-        if interaction_result.metadata.get("exit"):
-            logger.info("Exit phrase detected; ending conversation mode.")
+        if turn.metadata.get("timed_out"):
+            logger.info(
+                "Silence timeout reached after %.0f seconds; exiting conversation mode.",
+                silence_timeout,
+            )
             context.tts_engine.speak("Very well, Sir.")
-            send_listening(False)
             break
 
-        metadata = interaction_result.metadata or {}
-        styled_reply = interaction_result.reply or ""
+        text = turn.transcript.strip()
+        if text:
+            logger.info("Transcription: %s", text)
+            send_transcription(text)
+        else:
+            if mode == "manual":
+                logger.warning("No speech detected.")
+                context.tts_engine.speak("I am terribly sorry Sir, I did not catch that.")
+                continue
+            logger.info("Follow-up window timed out or empty; exiting conversation mode.")
+            break
+
+        if turn.metadata.get("exit"):
+            logger.info("Exit phrase detected; ending conversation mode.")
+            context.tts_engine.speak("Very well, Sir.")
+            break
+
+        metadata = turn.metadata or {}
+        styled_reply = turn.reply or ""
         response = metadata.get("raw_response")
         memory_result = metadata.get("memory_result")
         suggested_memory = metadata.get("suggested_memory")
@@ -536,8 +479,9 @@ def _run_conversation_loop(
 
         logger.info("Skill response: %s", response)
         send_thinking(0.0)
-        send_reply(styled_reply)
-        context.tts_engine.speak(styled_reply)
+        if styled_reply.strip():
+            send_reply(styled_reply)
+            context.tts_engine.speak(styled_reply)
 
         if memory_result is True:
             logger.info("Memory saved.")
@@ -562,46 +506,17 @@ def _run_conversation_loop(
                     if final_result:
                         logger.info("Memory saved.")
 
-        logger.info("Entering follow-up listening window.")
-        send_listening(True)
-        followup = context.stt_engine.transcribe(timeout=followup_timeout_sec)
-        send_listening(False)
-
-        if isinstance(followup, TranscriptionResult):
-            followup_result = followup
-        else:  # pragma: no cover - defensive for legacy return
-            followup_result = TranscriptionResult(text=str(followup), timed_out=False)
-
-        followup_text = followup_result.text.strip()
-        if followup_result.timed_out or not followup_text:
-            logger.info("Follow-up window timed out or empty; exiting conversation mode.")
+        if not turn.should_followup:
             break
 
-        if not should_respond(followup_text):
-            logger.info("Follow-up ignored due to response gating: %s", followup_text)
-            logger.info("Starting second-chance listening window.")
-            send_listening(True)
-            second_chance = context.stt_engine.transcribe(timeout=second_chance_timeout_sec)
-            send_listening(False)
-            if isinstance(second_chance, TranscriptionResult):
-                second_result = second_chance
-            else:  # pragma: no cover - defensive for legacy return
-                second_result = TranscriptionResult(text=str(second_chance), timed_out=False)
+        if turn.replied:
+            logger.info("Entering follow-up listening window.")
+            mode = "followup"
+        else:
+            logger.info("Entering second-chance listening window.")
+            mode = "second_chance"
 
-            second_text = second_result.text.strip()
-            if second_result.timed_out or not second_text:
-                logger.info("Second-chance window ended; exiting conversation mode.")
-                break
-            if not should_respond(second_text):
-                logger.info("Second-chance input ignored; exiting conversation mode.")
-                break
-
-            logger.info("Second-chance follow-up captured.")
-            pending_text = second_text
-            continue
-
-        logger.info("Follow-up captured.")
-        pending_text = followup_text
+        timeout_ms = turn.followup_timeout_ms
 
     try:
         clear_conversation_history()
