@@ -8,6 +8,8 @@ const enableAudioButton = document.getElementById('enable-audio');
 
 let pendingAudioUrl = null;
 let micBusy = false;
+let followupSessionId = 0;
+let followupAbortController = null;
 
 function setCoreState(nextState) {
   window.coreStateController?.setCoreState(nextState);
@@ -46,6 +48,12 @@ async function playAudioUrl(audioUrl) {
 
   pendingAudioUrl = audioUrl;
   audioEl.src = audioUrl;
+  const waitForEnd = () =>
+    new Promise((resolve) => {
+      const finalize = () => resolve();
+      audioEl.addEventListener('ended', finalize, { once: true });
+      audioEl.addEventListener('error', finalize, { once: true });
+    });
 
   try {
     await audioEl.play();
@@ -56,18 +64,121 @@ async function playAudioUrl(audioUrl) {
     } else {
       console.warn('Audio playback failed', error);
     }
+    return;
+  }
+
+  await waitForEnd();
+}
+
+function cancelFollowupLoop() {
+  followupSessionId += 1;
+  if (followupAbortController) {
+    followupAbortController.abort();
+    followupAbortController = null;
   }
 }
 
-async function handleAssistantResponse(data) {
-  appendMessage('assistant', data.reply || '');
+async function requestVoiceTurn({ mode, timeoutMs }) {
+  followupAbortController = new AbortController();
+  const response = await fetch('/api/voice_ptt', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ mode, timeout_ms: timeoutMs }),
+    signal: followupAbortController.signal,
+  });
+  followupAbortController = null;
+
+  if (!response.ok) {
+    if (response.status === 422) {
+      let message = "Didn't catch that, Sir.";
+      try {
+        const data = await response.json();
+        if (data?.message) {
+          message = data.message;
+        }
+      } catch (error) {
+        console.warn('Failed to parse no-speech response', error);
+      }
+      return { error: message };
+    }
+    if (response.status === 409) {
+      let message = 'Audio playback is active. Please wait, Sir.';
+      try {
+        const data = await response.json();
+        if (data?.detail) {
+          message = data.detail;
+        }
+      } catch (error) {
+        console.warn('Failed to parse voice error response', error);
+      }
+      return { error: message };
+    }
+    throw new Error(`Voice request failed with status ${response.status}`);
+  }
+
+  const data = await response.json();
+  return { data };
+}
+
+async function handleAssistantResponse(data, { enableFollowup } = {}) {
+  if (data.reply) {
+    appendMessage('assistant', data.reply);
+  }
   maybeTriggerToolImpulse(data.metadata);
   await playAudioUrl(data.audio_url);
+
+  if (!enableFollowup || !data.should_followup) return;
+
+  const sessionId = followupSessionId;
+  let attempt = 0;
+  let shouldContinue = data.should_followup;
+  let timeoutMs = data.followup_timeout_ms;
+  let nextMode = 'followup';
+
+  while (shouldContinue && sessionId === followupSessionId) {
+    setCoreState('listening');
+    let result;
+    try {
+      result = await requestVoiceTurn({ mode: nextMode, timeoutMs });
+    } catch (error) {
+      console.error('Voice error', error);
+      appendMessage('assistant', 'Audio capture unavailable right now, Sir.');
+      return;
+    }
+
+    setCoreState('thinking');
+    if (sessionId !== followupSessionId) return;
+    if (result.error) {
+      appendMessage('assistant', result.error);
+      return;
+    }
+
+    const nextData = result.data;
+    if (nextData?.text) {
+      appendMessage('user', nextData.text);
+    }
+
+    await handleAssistantResponse(nextData);
+
+    if (sessionId !== followupSessionId) return;
+
+    shouldContinue = nextData.should_followup;
+    timeoutMs = nextData.followup_timeout_ms;
+    nextMode = nextData.replied ? 'followup' : 'second_chance';
+
+    if (!nextData.replied && shouldContinue) {
+      attempt += 1;
+      if (attempt > 1) {
+        return;
+      }
+    }
+  }
 }
 
 async function sendMessage(value) {
   setCoreState('thinking');
   promptInput.setAttribute('aria-busy', 'true');
+  cancelFollowupLoop();
 
   appendMessage('user', value);
 
@@ -140,47 +251,26 @@ async function handleVoiceInput() {
 
   micBusy = true;
   setCoreState('listening');
+  cancelFollowupLoop();
 
   try {
-    const response = await fetch('/api/voice_ptt', { method: 'POST' });
+    const result = await requestVoiceTurn({
+      mode: 'manual',
+      timeoutMs: 20000,
+    });
     setCoreState('thinking');
 
-    if (!response.ok) {
-      if (response.status === 422) {
-        let message = "Didn't catch that, Sir.";
-        try {
-          const data = await response.json();
-          if (data?.message) {
-            message = data.message;
-          }
-        } catch (error) {
-          console.warn('Failed to parse no-speech response', error);
-        }
-        appendMessage('assistant', message);
-        return;
-      }
-      if (response.status === 409) {
-        let message = 'Audio playback is active. Please wait, Sir.';
-        try {
-          const data = await response.json();
-          if (data?.detail) {
-            message = data.detail;
-          }
-        } catch (error) {
-          console.warn('Failed to parse voice error response', error);
-        }
-        appendMessage('assistant', message);
-        return;
-      }
-      throw new Error(`Voice request failed with status ${response.status}`);
+    if (result.error) {
+      appendMessage('assistant', result.error);
+      return;
     }
 
-    const data = await response.json();
+    const data = result.data;
     if (data.text) {
       appendMessage('user', data.text);
     }
 
-    await handleAssistantResponse(data);
+    await handleAssistantResponse(data, { enableFollowup: true });
   } catch (error) {
     console.error('Voice error', error);
     appendMessage('assistant', 'Audio capture unavailable right now, Sir.');
