@@ -44,6 +44,63 @@ from wakeword.engine import WakeWordEngine
 logger = logging.getLogger("RICO")
 
 
+ACKNOWLEDGEMENT_PHRASES = {
+    "ok",
+    "okay",
+    "yeah",
+    "yep",
+    "nah",
+    "nice",
+    "cool",
+    "cheers",
+    "thanks",
+    "thank you",
+    "lol",
+    "haha",
+    "alright",
+    "sound",
+    "safe",
+    "right",
+}
+
+QUESTION_STARTERS = (
+    "what",
+    "why",
+    "how",
+    "when",
+    "where",
+    "who",
+    "can",
+    "could",
+    "should",
+    "would",
+    "do",
+    "did",
+    "is",
+    "are",
+)
+
+
+def should_respond(text: str) -> bool:
+    """Return True when a reply is warranted for the provided text."""
+
+    if not text or not text.strip():
+        return False
+
+    normalized = re.sub(r"\s+", " ", text).strip().lower()
+    if normalized in ACKNOWLEDGEMENT_PHRASES:
+        return False
+
+    words = re.findall(r"\b\w+\b", normalized)
+    if len(words) <= 2 and "?" not in text:
+        return False
+
+    if "?" in text:
+        return True
+
+    return re.match(rf"^({'|'.join(QUESTION_STARTERS)})\b", normalized) is not None
+
+
 def _parse_response_output(completion: object) -> dict | None:
     """
     Extract a structured memory_response payload from the Responses API output.
@@ -427,24 +484,33 @@ def _run_conversation_loop(
 ) -> None:
     """Maintain an active conversation until an exit condition is met."""
 
+    followup_timeout_sec = 6.0
+    second_chance_timeout_sec = 3.0
+    pending_text: str | None = None
+
     while True:
-        send_listening(True)
-        transcription = context.stt_engine.transcribe(timeout=silence_timeout)
-        if isinstance(transcription, TranscriptionResult):
-            result = transcription
-        else:  # pragma: no cover - defensive for legacy return
-            result = TranscriptionResult(text=str(transcription), timed_out=False)
+        if pending_text is None:
+            send_listening(True)
+            transcription = context.stt_engine.transcribe(timeout=silence_timeout)
+            if isinstance(transcription, TranscriptionResult):
+                result = transcription
+            else:  # pragma: no cover - defensive for legacy return
+                result = TranscriptionResult(text=str(transcription), timed_out=False)
 
-        if result.timed_out:
-            logger.info(
-                "Silence timeout reached after %.0f seconds; exiting conversation mode.",
-                silence_timeout,
-            )
-            context.tts_engine.speak("Very well, Sir.")
-            send_listening(False)
-            break
+            if result.timed_out:
+                logger.info(
+                    "Silence timeout reached after %.0f seconds; exiting conversation mode.",
+                    silence_timeout,
+                )
+                context.tts_engine.speak("Very well, Sir.")
+                send_listening(False)
+                break
 
-        text = result.text.strip()
+            text = result.text.strip()
+        else:
+            text = pending_text.strip()
+            pending_text = None
+
         logger.info("Transcription: %s", text)
         send_transcription(text)
 
@@ -495,6 +561,47 @@ def _run_conversation_loop(
                     )
                     if final_result:
                         logger.info("Memory saved.")
+
+        logger.info("Entering follow-up listening window.")
+        send_listening(True)
+        followup = context.stt_engine.transcribe(timeout=followup_timeout_sec)
+        send_listening(False)
+
+        if isinstance(followup, TranscriptionResult):
+            followup_result = followup
+        else:  # pragma: no cover - defensive for legacy return
+            followup_result = TranscriptionResult(text=str(followup), timed_out=False)
+
+        followup_text = followup_result.text.strip()
+        if followup_result.timed_out or not followup_text:
+            logger.info("Follow-up window timed out or empty; exiting conversation mode.")
+            break
+
+        if not should_respond(followup_text):
+            logger.info("Follow-up ignored due to response gating: %s", followup_text)
+            logger.info("Starting second-chance listening window.")
+            send_listening(True)
+            second_chance = context.stt_engine.transcribe(timeout=second_chance_timeout_sec)
+            send_listening(False)
+            if isinstance(second_chance, TranscriptionResult):
+                second_result = second_chance
+            else:  # pragma: no cover - defensive for legacy return
+                second_result = TranscriptionResult(text=str(second_chance), timed_out=False)
+
+            second_text = second_result.text.strip()
+            if second_result.timed_out or not second_text:
+                logger.info("Second-chance window ended; exiting conversation mode.")
+                break
+            if not should_respond(second_text):
+                logger.info("Second-chance input ignored; exiting conversation mode.")
+                break
+
+            logger.info("Second-chance follow-up captured.")
+            pending_text = second_text
+            continue
+
+        logger.info("Follow-up captured.")
+        pending_text = followup_text
 
     try:
         clear_conversation_history()

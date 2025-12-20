@@ -14,7 +14,7 @@ try:
 except Exception:  # pragma: no cover - optional dependency
     OpenAI = None  # type: ignore
 
-from rico.voice.ptt_input import record_to_wav
+from rico.voice.vad_input import record_to_wav_vad
 from rico.voice.transcribe import transcribe_wav
 from utils.text import clean_transcription
 
@@ -89,7 +89,7 @@ class SpeechToTextEngine:
             print("Voice is disabled. Set VOICE_ENABLED=true to use push-to-talk.")
             return self._retry_text_input(timeout)
 
-        output_path = record_to_wav(
+        output_path = record_to_wav_vad(
             sample_rate=self.voice_sample_rate,
             max_seconds=self.voice_max_seconds,
         )
