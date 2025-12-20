@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import logging
 import re
 from typing import Any
 
@@ -37,6 +38,7 @@ ACKNOWLEDGEMENT_PHRASES = {
 }
 
 GREETING_PHRASES = {
+    "hallo",
     "hello",
     "hi",
     "hey",
@@ -63,6 +65,8 @@ QUESTION_STARTERS = (
     "are",
 )
 
+logger = logging.getLogger(__name__)
+
 
 @dataclass
 class TurnResult:
@@ -76,27 +80,48 @@ class TurnResult:
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
-def should_respond(text: str) -> bool:
+def _normalize_text(text: str) -> str:
+    normalized = re.sub(r"\s+", " ", text).strip().lower()
+    return re.sub(r"[^\w\s]", "", normalized)
+
+
+def _should_respond_with_reason(text: str) -> tuple[bool, str | None]:
     """Return True when a reply is warranted for the provided text."""
 
     if not text or not text.strip():
-        return False
+        return False, "empty"
 
-    normalized = re.sub(r"\s+", " ", text).strip().lower()
+    normalized = _normalize_text(text)
+    if not normalized:
+        return False, "empty"
+
     if normalized in ACKNOWLEDGEMENT_PHRASES:
-        return False
+        return False, "ack"
 
     if normalized in GREETING_PHRASES:
-        return True
+        return True, None
 
     words = re.findall(r"\b\w+\b", normalized)
     if len(words) <= 2 and "?" not in text:
-        return False
+        return False, "short_non_question"
 
     if "?" in text:
-        return True
+        return True, None
 
-    return re.match(rf"^({'|'.join(QUESTION_STARTERS)})\b", normalized) is not None
+    if re.match(rf"^({'|'.join(QUESTION_STARTERS)})\b", normalized) is not None:
+        return True, None
+
+    return False, "short_non_question"
+
+
+def should_respond(text: str) -> bool:
+    respond, _reason = _should_respond_with_reason(text)
+    return respond
+
+
+def _is_acknowledgement(text: str) -> bool:
+    normalized = _normalize_text(text)
+    return normalized in ACKNOWLEDGEMENT_PHRASES
 
 
 def _build_turn_result(
@@ -131,6 +156,12 @@ def process_text_turn(
 
     if not cleaned:
         metadata["error"] = "no_text"
+        logger.info(
+            "orchestrator: gated transcript=%r mode=%s reason=%s",
+            cleaned,
+            "text",
+            "empty",
+        )
         return _build_turn_result(
             transcript="",
             reply="",
@@ -139,8 +170,15 @@ def process_text_turn(
             followup_timeout_ms=0,
         )
 
-    if not should_respond(cleaned):
+    if _is_acknowledgement(cleaned):
         metadata["gated"] = True
+        metadata["gated_reason"] = "ack"
+        logger.info(
+            "orchestrator: gated transcript=%r mode=%s reason=%s",
+            cleaned,
+            "text",
+            "ack",
+        )
         return _build_turn_result(
             transcript=cleaned,
             reply="",
@@ -231,6 +269,12 @@ def process_voice_turn(
     metadata.update(transcript_meta)
 
     if not transcript:
+        logger.info(
+            "orchestrator: gated transcript=%r mode=%s reason=%s",
+            transcript,
+            mode,
+            "empty",
+        )
         return _build_turn_result(
             transcript="",
             reply="",
@@ -239,8 +283,23 @@ def process_voice_turn(
             followup_timeout_ms=0,
         )
 
-    if mode in {"followup", "second_chance"} and not should_respond(transcript):
+    if mode in {"followup", "second_chance"}:
+        should_reply, reason = _should_respond_with_reason(transcript)
+    else:
+        should_reply, reason = True, None
+
+    if mode == "manual" and _is_acknowledgement(transcript):
+        should_reply, reason = False, "ack"
+
+    if mode in {"followup", "second_chance"} and not should_reply:
         metadata["gated"] = True
+        metadata["gated_reason"] = reason
+        logger.info(
+            "orchestrator: gated transcript=%r mode=%s reason=%s",
+            transcript,
+            mode,
+            reason,
+        )
         should_followup = mode == "followup"
         timeout = SECOND_CHANCE_TIMEOUT_MS if should_followup else 0
         return _build_turn_result(
@@ -249,6 +308,23 @@ def process_voice_turn(
             metadata=metadata,
             should_followup=should_followup,
             followup_timeout_ms=timeout,
+        )
+
+    if mode == "manual" and not should_reply:
+        metadata["gated"] = True
+        metadata["gated_reason"] = reason
+        logger.info(
+            "orchestrator: gated transcript=%r mode=%s reason=%s",
+            transcript,
+            mode,
+            reason,
+        )
+        return _build_turn_result(
+            transcript=transcript,
+            reply="",
+            metadata=metadata,
+            should_followup=False,
+            followup_timeout_ms=0,
         )
 
     text_result = process_text_turn(rico_app, context, transcript, source)
