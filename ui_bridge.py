@@ -12,6 +12,7 @@ from websocket_server import UIBroadcastServer
 logger = logging.getLogger(__name__)
 
 _server: Optional[UIBroadcastServer] = None
+_speaking_active = False
 
 
 def start_ui_server(host: str = "127.0.0.1", port: int = 8765) -> None:
@@ -87,18 +88,28 @@ def send_provider(provider: str) -> None:
 
 def send_speaking(start: bool) -> None:
     active = bool(start)
+    global _speaking_active
+    _speaking_active = active
     _send_event({"type": "speaking", "active": active})
     send_state("speaking", active)
 
 
 def send_speaking_start() -> None:
+    global _speaking_active
+    _speaking_active = True
     _send_event({"type": "speaking_start"})
     send_state("speaking", True)
 
 
 def send_speaking_end() -> None:
+    global _speaking_active
+    _speaking_active = False
     _send_event({"type": "speaking_end"})
     send_state("speaking", False)
+
+
+def is_speaking() -> bool:
+    return _speaking_active
 
 
 def send_audio_level(level: float) -> None:
@@ -146,6 +157,7 @@ __all__ = [
     "send_speaking_end",
     "send_speaking_start",
     "send_speaking",
+    "is_speaking",
     "send_state",
     "send_thinking",
     "send_transcription",

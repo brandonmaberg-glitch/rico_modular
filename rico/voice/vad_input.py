@@ -5,7 +5,8 @@ import logging
 import os
 import time
 import wave
-from typing import Optional
+from collections import deque
+from typing import Deque, Optional
 
 
 logger = logging.getLogger("RICO")
@@ -16,8 +17,10 @@ def record_to_wav_vad(
     sample_rate: int = 16000,
     channels: int = 1,
     max_seconds: int = 15,
-    silence_ms: int = 900,
+    silence_ms: int = 800,
     aggressiveness: int = 2,
+    pre_roll_ms: int = 400,
+    min_voiced_ms: int = 400,
     output_path: str = "./tmp/input.wav",
 ) -> Optional[str]:
     """Record audio with VAD until silence or max duration is reached."""
@@ -50,8 +53,11 @@ def record_to_wav_vad(
     bytes_per_frame = frame_samples * 2
 
     frames: list[bytes] = []
+    pre_roll_frames = max(1, int(pre_roll_ms / frame_duration_ms))
+    pre_roll: Deque[bytes] = deque(maxlen=pre_roll_frames)
     voiced_ms = 0
     silence_duration_ms = 0
+    speech_started = False
     start_time = time.monotonic()
 
     logger.info("Starting VAD recording: %s", output_path)
@@ -79,15 +85,24 @@ def record_to_wav_vad(
                 if len(frame) != bytes_per_frame:
                     continue
 
-                frames.append(frame)
-
                 is_speech = vad.is_speech(frame, sample_rate)
+                if not speech_started:
+                    pre_roll.append(frame)
+                    if is_speech:
+                        speech_started = True
+                        frames.extend(pre_roll)
+                        pre_roll.clear()
+                        voiced_ms += frame_duration_ms
+                        silence_duration_ms = 0
+                    continue
+
+                frames.append(frame)
                 if is_speech:
                     voiced_ms += frame_duration_ms
                     silence_duration_ms = 0
                 else:
                     silence_duration_ms += frame_duration_ms
-                    if voiced_ms > 0 and silence_duration_ms >= silence_ms:
+                    if voiced_ms >= min_voiced_ms and silence_duration_ms >= silence_ms:
                         logger.info(
                             "Silence threshold reached after %dms.", silence_duration_ms
                         )
@@ -96,8 +111,10 @@ def record_to_wav_vad(
         logger.error("VAD recording failed: %s", exc)
         return None
 
-    if voiced_ms < 300:
-        logger.info("Insufficient voiced audio captured (%dms).", voiced_ms)
+    if voiced_ms < min_voiced_ms:
+        logger.info(
+            "Insufficient voiced audio captured (%dms).", voiced_ms
+        )
         return None
 
     try:

@@ -10,6 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from rico.app import RicoApp
+from ui_bridge import is_speaking
 from rico.app_context import get_app_context
 
 
@@ -71,6 +72,11 @@ async def chat(request: ChatRequest) -> ChatResponse:
 
 @app.post("/api/voice_ptt", response_model=VoiceResponse)
 async def voice_ptt() -> VoiceResponse:
+    if is_speaking():
+        raise HTTPException(
+            status_code=409,
+            detail="RICO is speaking right now. Please wait for playback to finish.",
+        )
     result = rico_app.handle_voice_ptt(source="web")
     transcription = result.text or ""
     reply = result.reply or ""
