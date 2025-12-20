@@ -50,8 +50,12 @@ def create_app_context() -> AppContext:
         config.openai_api_key,
         voice_enabled=config.voice_enabled,
         voice_key=config.voice_key,
-        voice_sample_rate=config.voice_sample_rate,
-        voice_max_seconds=config.voice_max_seconds,
+        vad_sample_rate=config.vad_sample_rate,
+        vad_max_seconds=config.vad_max_seconds,
+        vad_silence_ms=config.vad_silence_ms,
+        vad_aggressiveness=config.vad_aggressiveness,
+        vad_pre_roll_ms=config.vad_pre_roll_ms,
+        vad_min_voiced_ms=config.vad_min_voiced_ms,
     )
 
     tts_engine = Speaker(

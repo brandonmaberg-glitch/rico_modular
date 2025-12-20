@@ -22,6 +22,12 @@ class AppConfig:
     voice_key: str
     voice_sample_rate: int
     voice_max_seconds: int
+    vad_sample_rate: int
+    vad_max_seconds: int
+    vad_silence_ms: int
+    vad_aggressiveness: int
+    vad_pre_roll_ms: int
+    vad_min_voiced_ms: int
 
     @classmethod
     def load(cls) -> "AppConfig":
@@ -34,6 +40,12 @@ class AppConfig:
         voice_key = get_env_var("VOICE_KEY", required=False, default="v")
         voice_sample_rate = get_env_var("VOICE_SAMPLE_RATE", required=False, default="16000")
         voice_max_seconds = get_env_var("VOICE_MAX_SECONDS", required=False, default="20")
+        vad_sample_rate = get_env_var("VAD_SAMPLE_RATE", required=False, default="16000")
+        vad_max_seconds = get_env_var("VAD_MAX_SECONDS", required=False, default="15")
+        vad_silence_ms = get_env_var("VAD_SILENCE_MS", required=False, default="800")
+        vad_aggressiveness = get_env_var("VAD_AGGRESSIVENESS", required=False, default="2")
+        vad_pre_roll_ms = get_env_var("VAD_PRE_ROLL_MS", required=False, default="400")
+        vad_min_voiced_ms = get_env_var("VAD_MIN_VOICED_MS", required=False, default="400")
 
         return cls(
             openai_api_key=openai_api_key,
@@ -44,6 +56,12 @@ class AppConfig:
             voice_key=voice_key or "v",
             voice_sample_rate=int(voice_sample_rate or 16000),
             voice_max_seconds=int(voice_max_seconds or 20),
+            vad_sample_rate=int(vad_sample_rate or 16000),
+            vad_max_seconds=int(vad_max_seconds or 15),
+            vad_silence_ms=int(vad_silence_ms or 800),
+            vad_aggressiveness=int(vad_aggressiveness or 2),
+            vad_pre_roll_ms=int(vad_pre_roll_ms or 400),
+            vad_min_voiced_ms=int(vad_min_voiced_ms or 400),
         )
 
 

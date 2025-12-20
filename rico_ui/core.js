@@ -146,6 +146,19 @@ async function handleVoiceInput() {
     setCoreState('thinking');
 
     if (!response.ok) {
+      if (response.status === 409) {
+        let message = 'Audio playback is active. Please wait, Sir.';
+        try {
+          const data = await response.json();
+          if (data?.detail) {
+            message = data.detail;
+          }
+        } catch (error) {
+          console.warn('Failed to parse voice error response', error);
+        }
+        appendMessage('assistant', message);
+        return;
+      }
       throw new Error(`Voice request failed with status ${response.status}`);
     }
 

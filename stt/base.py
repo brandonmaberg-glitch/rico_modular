@@ -39,15 +39,23 @@ class SpeechToTextEngine:
         *,
         voice_enabled: bool = False,
         voice_key: str = "v",
-        voice_sample_rate: int = 16000,
-        voice_max_seconds: int = 20,
+        vad_sample_rate: int = 16000,
+        vad_max_seconds: int = 15,
+        vad_silence_ms: int = 800,
+        vad_aggressiveness: int = 2,
+        vad_pre_roll_ms: int = 400,
+        vad_min_voiced_ms: int = 400,
     ) -> None:
         self.api_key = api_key
         self._client = None
         self.voice_enabled = voice_enabled
         self.voice_key = (voice_key or "v").lower()
-        self.voice_sample_rate = voice_sample_rate
-        self.voice_max_seconds = voice_max_seconds
+        self.vad_sample_rate = vad_sample_rate
+        self.vad_max_seconds = vad_max_seconds
+        self.vad_silence_ms = vad_silence_ms
+        self.vad_aggressiveness = vad_aggressiveness
+        self.vad_pre_roll_ms = vad_pre_roll_ms
+        self.vad_min_voiced_ms = vad_min_voiced_ms
         if api_key and OpenAI:
             try:
                 self._client = OpenAI(api_key=api_key)
@@ -89,9 +97,14 @@ class SpeechToTextEngine:
             print("Voice is disabled. Set VOICE_ENABLED=true to use push-to-talk.")
             return self._retry_text_input(timeout)
 
+        logger.info("Using VAD recorder.")
         output_path = record_to_wav_vad(
-            sample_rate=self.voice_sample_rate,
-            max_seconds=self.voice_max_seconds,
+            sample_rate=self.vad_sample_rate,
+            max_seconds=self.vad_max_seconds,
+            silence_ms=self.vad_silence_ms,
+            aggressiveness=self.vad_aggressiveness,
+            pre_roll_ms=self.vad_pre_roll_ms,
+            min_voiced_ms=self.vad_min_voiced_ms,
         )
         if not output_path:
             print("Falling back to typed input.")

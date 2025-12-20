@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from rico.app_context import AppContext
 from rico.commands import _handle_voice_command, _normalise_command, _should_exit
 from rico.processing import handle_text_interaction
-from rico.voice.ptt_input import record_to_wav, record_to_wav_timed
+from rico.voice.vad_input import record_to_wav_vad
 from rico.voice.transcribe import transcribe_wav
 
 
@@ -71,34 +71,20 @@ class RicoApp:
                 reply="", metadata={"source": source, "error": "voice_disabled"}
             )
 
-        if source == "web":
-            self.context.logger.info(
-                "Starting timed recording for %s seconds",
-                self.context.config.voice_max_seconds,
+        self.context.logger.info("Using VAD recorder.")
+        output_path = record_to_wav_vad(
+            sample_rate=self.context.config.vad_sample_rate,
+            max_seconds=self.context.config.vad_max_seconds,
+            silence_ms=self.context.config.vad_silence_ms,
+            aggressiveness=self.context.config.vad_aggressiveness,
+            pre_roll_ms=self.context.config.vad_pre_roll_ms,
+            min_voiced_ms=self.context.config.vad_min_voiced_ms,
+        )
+        if not output_path:
+            return RicoResponse(
+                reply="",
+                metadata={"source": source, "error": "voice_capture_unavailable"},
             )
-            recorded = record_to_wav_timed(
-                sample_rate=self.context.config.voice_sample_rate,
-                max_seconds=self.context.config.voice_max_seconds,
-            )
-            if not recorded:
-                return RicoResponse(
-                    reply="",
-                    metadata={"source": source, "error": "voice_capture_unavailable"},
-                )
-
-            output_path, duration = recorded
-            self.context.logger.info("Stopped recording after %.2f seconds", duration)
-        else:
-            output_path = record_to_wav(
-                sample_rate=self.context.config.voice_sample_rate,
-                max_seconds=self.context.config.voice_max_seconds,
-            )
-            if not output_path:
-                return RicoResponse(
-                    reply="",
-                    metadata={"source": source, "error": "voice_capture_unavailable"},
-                )
-
 
         transcript = transcribe_wav(output_path).strip()
         if not transcript:
