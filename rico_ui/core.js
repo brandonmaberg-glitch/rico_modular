@@ -143,14 +143,14 @@ async function handleAssistantResponse(data, { enableFollowup } = {}) {
     } catch (error) {
       console.error('Voice error', error);
       appendMessage('assistant', 'Audio capture unavailable right now, Sir.');
-      return;
+      break;
     }
 
     setCoreState('thinking');
     if (sessionId !== followupSessionId) return;
     if (result.error) {
       appendMessage('assistant', result.error);
-      return;
+      break;
     }
 
     const nextData = result.data;
@@ -169,9 +169,13 @@ async function handleAssistantResponse(data, { enableFollowup } = {}) {
     if (!nextData.replied && shouldContinue) {
       attempt += 1;
       if (attempt > 1) {
-        return;
+        break;
       }
     }
+  }
+
+  if (sessionId === followupSessionId) {
+    setCoreState('idle');
   }
 }
 
@@ -252,6 +256,7 @@ async function handleVoiceInput() {
   micBusy = true;
   setCoreState('listening');
   cancelFollowupLoop();
+  let followupStarted = false;
 
   try {
     const result = await requestVoiceTurn({
@@ -270,13 +275,19 @@ async function handleVoiceInput() {
       appendMessage('user', data.text);
     }
 
+    if (data && data.should_followup) {
+      followupStarted = true;
+    }
+
     await handleAssistantResponse(data, { enableFollowup: true });
   } catch (error) {
     console.error('Voice error', error);
     appendMessage('assistant', 'Audio capture unavailable right now, Sir.');
   } finally {
     micBusy = false;
-    setCoreState('idle');
+    if (!followupStarted) {
+      setCoreState('idle');
+    }
   }
 }
 
