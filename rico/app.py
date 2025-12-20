@@ -19,6 +19,7 @@ class RicoResponse:
     reply: str
     metadata: dict
     text: str | None = None
+    wav_path: str | None = None
 
 
 class RicoApp:
@@ -83,7 +84,8 @@ class RicoApp:
         if not output_path:
             return RicoResponse(
                 reply="",
-                metadata={"source": source, "error": "voice_capture_unavailable"},
+                metadata={"source": source, "error": "no_speech"},
+                wav_path=None,
             )
 
         transcript = transcribe_wav(output_path).strip()
@@ -93,11 +95,14 @@ class RicoApp:
             except OSError:
                 pass
             return RicoResponse(
-                reply="", metadata={"source": source, "error": "empty_transcription"}
+                reply="",
+                metadata={"source": source, "error": "no_transcript"},
+                wav_path=output_path,
             )
 
         response = self.handle_text(transcript, source=source)
         response.text = transcript
+        response.wav_path = output_path
 
         try:
             os.remove(output_path)
