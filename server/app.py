@@ -79,46 +79,69 @@ async def chat(request: ChatRequest) -> ChatResponse:
 
 @app.post("/api/voice_ptt", response_model=VoiceResponse)
 async def voice_ptt() -> VoiceResponse:
+    logger.info("voice_ptt: ENTER endpoint")
     if is_speaking():
         raise HTTPException(
             status_code=409,
             detail="RICO is speaking right now. Please wait for playback to finish.",
         )
-    result = rico_app.handle_voice_ptt(source="web")
-    transcription = result.text or ""
-    reply = result.reply or ""
-    metadata = result.metadata or {}
-
-    logger.info("voice_ptt: wav_path=%s", result.wav_path)
-    logger.info("voice_ptt: transcript=%s", transcription)
-    logger.info("voice_ptt: reply_len=%d", len(reply))
-
-    error = metadata.get("error")
-    if error == "no_speech":
-        return JSONResponse(
-            status_code=422,
-            content={
-                "error": "no_speech",
-                "message": "I didn't catch that. Try again.",
-            },
+    try:
+        logger.info("voice_ptt: starting audio recording (VAD)")
+        result = rico_app.handle_voice_ptt(source="web")
+        logger.info(
+            "voice_ptt: record_to_wav_vad returned wav_path=%r", result.wav_path
         )
-    if error == "no_transcript":
-        return JSONResponse(
-            status_code=422,
-            content={
-                "error": "no_transcript",
-                "message": "I couldn't transcribe that. Try again.",
-            },
+        if result.wav_path is None:
+            logger.warning("voice_ptt: NO AUDIO CAPTURED (wav_path is None)")
+        logger.info("voice_ptt: starting transcription")
+        transcription = result.text or ""
+        logger.info("voice_ptt: transcription result=%r", transcription)
+        logger.info("voice_ptt: sending text to RICO handler")
+        reply = result.reply or ""
+        metadata = result.metadata or {}
+
+        logger.info(
+            "voice_ptt: reply_len=%d reply_preview=%r",
+            len(reply or ""),
+            (reply[:60] if reply else ""),
         )
 
-    audio_url = _build_audio_file(reply)
+        error = metadata.get("error")
+        if error == "no_speech":
+            return JSONResponse(
+                status_code=422,
+                content={
+                    "error": "no_speech",
+                    "message": "I didn't catch that. Try again.",
+                },
+            )
+        if error == "no_transcript":
+            return JSONResponse(
+                status_code=422,
+                content={
+                    "error": "no_transcript",
+                    "message": "I couldn't transcribe that. Try again.",
+                },
+            )
 
-    return VoiceResponse(
-        text=transcription,
-        reply=reply,
-        metadata=metadata,
-        audio_url=audio_url,
-    )
+        audio_url = _build_audio_file(reply)
+
+        logger.info("voice_ptt: EXIT endpoint with success response")
+        return VoiceResponse(
+            text=transcription,
+            reply=reply,
+            metadata=metadata,
+            audio_url=audio_url,
+        )
+    except Exception as exc:
+        logger.exception("voice_ptt: EXCEPTION occurred")
+        return JSONResponse(
+            status_code=500,
+            content={
+                "error": "internal_error",
+                "message": "An internal error occurred.",
+            },
+        )
 
 
 app.mount("/api/audio", StaticFiles(directory=TTS_DIR), name="audio")
