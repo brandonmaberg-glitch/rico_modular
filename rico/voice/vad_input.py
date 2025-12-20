@@ -17,6 +17,7 @@ def record_to_wav_vad(
     sample_rate: int = 16000,
     channels: int = 1,
     max_seconds: int = 15,
+    wait_for_speech_ms: int = 2000,
     silence_ms: int = 800,
     aggressiveness: int = 2,
     pre_roll_ms: int = 400,
@@ -70,9 +71,16 @@ def record_to_wav_vad(
             blocksize=frame_samples,
         ) as stream:
             while True:
-                if time.monotonic() - start_time >= max_seconds:
+                elapsed = time.monotonic() - start_time
+                if elapsed >= max_seconds:
                     logger.info("VAD recording reached max duration (%.1fs).", max_seconds)
                     break
+                if not speech_started and elapsed * 1000 >= wait_for_speech_ms:
+                    logger.info(
+                        "No speech detected within wait window (%dms).",
+                        wait_for_speech_ms,
+                    )
+                    return None
 
                 data, overflowed = stream.read(frame_samples)
                 if overflowed:  # pragma: no cover - passthrough from sounddevice
@@ -102,13 +110,17 @@ def record_to_wav_vad(
                     silence_duration_ms = 0
                 else:
                     silence_duration_ms += frame_duration_ms
-                    if voiced_ms >= min_voiced_ms and silence_duration_ms >= silence_ms:
+                    if silence_duration_ms >= silence_ms:
                         logger.info(
                             "Silence threshold reached after %dms.", silence_duration_ms
                         )
                         break
     except Exception as exc:  # pragma: no cover - hardware dependent
         logger.error("VAD recording failed: %s", exc)
+        return None
+
+    if not speech_started:
+        logger.info("No speech detected before timeout.")
         return None
 
     if voiced_ms < min_voiced_ms:

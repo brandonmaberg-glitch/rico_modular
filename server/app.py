@@ -5,7 +5,10 @@ from __future__ import annotations
 import uuid
 from pathlib import Path
 
+import logging
+
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -22,10 +25,14 @@ app = FastAPI(title="RICO Web")
 # Shared singleton context reused by both CLI and web layers.
 context = get_app_context()
 rico_app = RicoApp(context)
+logger = logging.getLogger("RICO")
 
 
 def _build_audio_file(text: str) -> str | None:
     """Generate TTS audio for the given text and return a relative URL."""
+
+    if not text.strip():
+        return None
 
     synthesized = context.tts_engine.synthesize(text)
     if not synthesized:
@@ -81,6 +88,29 @@ async def voice_ptt() -> VoiceResponse:
     transcription = result.text or ""
     reply = result.reply or ""
     metadata = result.metadata or {}
+
+    logger.info("voice_ptt: wav_path=%s", result.wav_path)
+    logger.info("voice_ptt: transcript=%s", transcription)
+    logger.info("voice_ptt: reply_len=%d", len(reply))
+
+    error = metadata.get("error")
+    if error == "no_speech":
+        return JSONResponse(
+            status_code=422,
+            content={
+                "error": "no_speech",
+                "message": "I didn't catch that. Try again.",
+            },
+        )
+    if error == "no_transcript":
+        return JSONResponse(
+            status_code=422,
+            content={
+                "error": "no_transcript",
+                "message": "I couldn't transcribe that. Try again.",
+            },
+        )
+
     audio_url = _build_audio_file(reply)
 
     return VoiceResponse(
