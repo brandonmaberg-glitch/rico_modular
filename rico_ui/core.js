@@ -10,9 +10,60 @@ let pendingAudioUrl = null;
 let micBusy = false;
 let followupSessionId = 0;
 let followupAbortController = null;
+let coreState = null;
+let debugPanel = null;
+let debugFields = null;
 
 function setCoreState(nextState) {
+  coreState = nextState;
   window.coreStateController?.setCoreState(nextState);
+  updateDebugPanel();
+}
+
+function setupDebugPanel() {
+  if (debugPanel) return;
+
+  debugPanel = document.createElement('div');
+  debugPanel.className = 'core-debug-panel';
+  debugPanel.style.position = 'fixed';
+  debugPanel.style.top = '12px';
+  debugPanel.style.right = '12px';
+  debugPanel.style.zIndex = '9999';
+  debugPanel.style.background = 'rgba(0, 0, 0, 0.75)';
+  debugPanel.style.color = '#fff';
+  debugPanel.style.fontFamily = 'monospace';
+  debugPanel.style.fontSize = '12px';
+  debugPanel.style.padding = '8px 10px';
+  debugPanel.style.borderRadius = '6px';
+  debugPanel.style.pointerEvents = 'none';
+
+  const field = (label) => {
+    const row = document.createElement('div');
+    const name = document.createElement('span');
+    name.textContent = `${label}: `;
+    const value = document.createElement('span');
+    row.appendChild(name);
+    row.appendChild(value);
+    debugPanel.appendChild(row);
+    return value;
+  };
+
+  debugFields = {
+    coreState: field('coreState'),
+    micBusy: field('micBusy'),
+    followupSessionId: field('followupSessionId'),
+    followupAbort: field('followupAbortController'),
+  };
+
+  document.body.appendChild(debugPanel);
+}
+
+function updateDebugPanel() {
+  if (!debugPanel || !debugFields) return;
+  debugFields.coreState.textContent = coreState ?? 'unknown';
+  debugFields.micBusy.textContent = String(micBusy);
+  debugFields.followupSessionId.textContent = String(followupSessionId);
+  debugFields.followupAbort.textContent = followupAbortController ? 'active' : 'idle';
 }
 
 function appendMessage(role, text) {
@@ -71,22 +122,28 @@ async function playAudioUrl(audioUrl) {
 }
 
 function cancelFollowupLoop() {
+  console.debug('[FOLLOWUP] cancel', { followupSessionId });
   followupSessionId += 1;
   if (followupAbortController) {
     followupAbortController.abort();
     followupAbortController = null;
   }
+  updateDebugPanel();
 }
 
 async function requestVoiceTurn({ mode, timeoutMs }) {
+  console.debug('[FOLLOWUP] request', { mode, timeoutMs });
   followupAbortController = new AbortController();
+  updateDebugPanel();
   const response = await fetch('/api/voice_ptt', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ mode, timeout_ms: timeoutMs }),
     signal: followupAbortController.signal,
   });
+  console.debug('[FOLLOWUP] response status', response.status);
   followupAbortController = null;
+  updateDebugPanel();
 
   if (!response.ok) {
     if (response.status === 422) {
@@ -121,13 +178,22 @@ async function requestVoiceTurn({ mode, timeoutMs }) {
 }
 
 async function handleAssistantResponse(data, { enableFollowup } = {}) {
+  console.debug('[ASSIST] handle', {
+    replied: data?.replied,
+    should_followup: data?.should_followup,
+  });
   if (data.reply) {
     appendMessage('assistant', data.reply);
   }
   maybeTriggerToolImpulse(data.metadata);
   await playAudioUrl(data.audio_url);
 
-  if (!enableFollowup || !data.should_followup) return;
+  if (!enableFollowup || !data.should_followup) {
+    if (enableFollowup) {
+      setCoreState('idle');
+    }
+    return;
+  }
 
   const sessionId = followupSessionId;
   let attempt = 0;
@@ -135,7 +201,20 @@ async function handleAssistantResponse(data, { enableFollowup } = {}) {
   let timeoutMs = data.followup_timeout_ms;
   let nextMode = 'followup';
 
+  console.debug('[FOLLOWUP] start', {
+    sessionId,
+    followupSessionId,
+    timeoutMs,
+    nextMode,
+  });
+
   while (shouldContinue && sessionId === followupSessionId) {
+    console.debug('[FOLLOWUP] iter', {
+      sessionId,
+      followupSessionId,
+      nextMode,
+      timeoutMs,
+    });
     setCoreState('listening');
     let result;
     try {
@@ -174,7 +253,7 @@ async function handleAssistantResponse(data, { enableFollowup } = {}) {
     }
   }
 
-  if (sessionId === followupSessionId) {
+  if (enableFollowup && sessionId === followupSessionId) {
     setCoreState('idle');
   }
 }
@@ -230,8 +309,8 @@ promptInput.addEventListener('focus', () => {
 });
 
 // Placeholder hooks for microphone lifecycle.
-document.addEventListener('rico-voice-start', () => setCoreState('listening'));
-document.addEventListener('rico-voice-end', () => setCoreState('idle'));
+// document.addEventListener('rico-voice-start', () => setCoreState('listening'));
+// document.addEventListener('rico-voice-end', () => setCoreState('idle'));
 
 if (enableAudioButton) {
   enableAudioButton.addEventListener('click', async () => {
@@ -254,14 +333,21 @@ async function handleVoiceInput() {
   if (!micButton || micBusy) return;
 
   micBusy = true;
+  updateDebugPanel();
+  console.debug('[VOICE] click: start', { micBusy, followupSessionId });
   setCoreState('listening');
   cancelFollowupLoop();
-  let followupStarted = false;
 
   try {
     const result = await requestVoiceTurn({
       mode: 'manual',
       timeoutMs: 20000,
+    });
+    console.debug('[VOICE] manual result', result.data || result.error);
+    console.debug('[VOICE] flags', {
+      replied: result.data?.replied,
+      should_followup: result.data?.should_followup,
+      followup_timeout_ms: result.data?.followup_timeout_ms,
     });
     setCoreState('thinking');
 
@@ -275,20 +361,17 @@ async function handleVoiceInput() {
       appendMessage('user', data.text);
     }
 
-    if (data && data.should_followup) {
-      followupStarted = true;
-    }
-
     await handleAssistantResponse(data, { enableFollowup: true });
   } catch (error) {
     console.error('Voice error', error);
     appendMessage('assistant', 'Audio capture unavailable right now, Sir.');
   } finally {
     micBusy = false;
-    if (!followupStarted) {
-      setCoreState('idle');
-    }
+    updateDebugPanel();
   }
 }
+
+setupDebugPanel();
+updateDebugPanel();
 
 micButton?.addEventListener('click', handleVoiceInput);
