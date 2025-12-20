@@ -222,9 +222,13 @@ def _transcribe_cli(
 def _transcribe_web(
     context: AppContext,
     timeout_ms: int | None,
+    *,
+    wait_for_speech_ms: int | None = None,
+    allow_no_speech: bool = True,
 ) -> tuple[str, dict[str, Any]]:
     timeout_sec = timeout_ms / 1000 if timeout_ms else context.config.vad_max_seconds
     max_seconds = min(context.config.vad_max_seconds, timeout_sec)
+    wait_window_ms = wait_for_speech_ms if wait_for_speech_ms is not None else 2000
 
     output_path = record_to_wav_vad(
         sample_rate=context.config.vad_sample_rate,
@@ -233,8 +237,11 @@ def _transcribe_web(
         aggressiveness=context.config.vad_aggressiveness,
         pre_roll_ms=context.config.vad_pre_roll_ms,
         min_voiced_ms=context.config.vad_min_voiced_ms,
+        wait_for_speech_ms=wait_window_ms,
     )
     if not output_path:
+        if allow_no_speech:
+            return "", {"no_speech": True}
         return "", {"error": "no_speech"}
 
     transcript = transcribe_wav(output_path).strip()
@@ -263,12 +270,27 @@ def process_voice_turn(
 
     metadata: dict[str, Any] = {"source": source, "mode": mode}
     if source == "web":
-        transcript, transcript_meta = _transcribe_web(context, timeout_ms)
+        if mode == "followup":
+            logger.info(
+                "Follow-up: waiting up to %d ms for speech...",
+                timeout_ms,
+            )
+            wait_for_speech_ms = timeout_ms
+        else:
+            wait_for_speech_ms = None
+        transcript, transcript_meta = _transcribe_web(
+            context,
+            timeout_ms,
+            wait_for_speech_ms=wait_for_speech_ms,
+            allow_no_speech=True,
+        )
     else:
         transcript, transcript_meta = _transcribe_cli(context, timeout_ms)
     metadata.update(transcript_meta)
 
     if not transcript:
+        if mode == "followup" and metadata.get("no_speech"):
+            logger.info("Follow-up: no speech detected; ending conversation")
         logger.info(
             "orchestrator: gated transcript=%r mode=%s reason=%s",
             transcript,
