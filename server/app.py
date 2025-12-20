@@ -72,13 +72,13 @@ class VoiceRequest(BaseModel):
 
 
 class VoiceResponse(BaseModel):
-    text: str
+    transcript: str
     reply: str
-    replied: bool
+    audio_url: str | None = None
     should_followup: bool
     followup_timeout_ms: int
+    ended_reason: str
     metadata: dict | None = None
-    audio_url: str | None = None
 
 
 @app.post("/api/chat", response_model=ChatResponse)
@@ -136,34 +136,29 @@ async def voice_ptt(request: VoiceRequest = Body(default_factory=VoiceRequest)) 
         )
 
         error = metadata.get("error")
-        if error == "no_speech":
-            return JSONResponse(
-                status_code=422,
-                content={
-                    "error": "no_speech",
-                    "message": "I didn't catch that. Try again.",
-                },
-            )
-        if error == "no_transcript":
-            return JSONResponse(
-                status_code=422,
-                content={
-                    "error": "no_transcript",
-                    "message": "I couldn't transcribe that. Try again.",
-                },
-            )
+        ended_reason = "replied"
+        if metadata.get("exit"):
+            ended_reason = "exit"
+        elif metadata.get("no_speech"):
+            ended_reason = "no_speech"
+        elif metadata.get("timed_out") or error == "timeout":
+            ended_reason = "timeout"
+        elif error:
+            ended_reason = "error"
+        elif not reply.strip():
+            ended_reason = "replied"
 
         audio_url = _build_audio_file(reply)
 
         logger.info("voice_ptt: EXIT endpoint with success response")
         return VoiceResponse(
-            text=transcription,
+            transcript=transcription,
             reply=reply,
-            replied=turn.replied,
+            audio_url=audio_url,
             should_followup=turn.should_followup,
             followup_timeout_ms=turn.followup_timeout_ms,
+            ended_reason=ended_reason,
             metadata=metadata,
-            audio_url=audio_url,
         )
     except Exception as exc:
         logger.exception("voice_ptt: EXCEPTION occurred")

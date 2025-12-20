@@ -13,6 +13,8 @@ let followupAbortController = null;
 let coreState = null;
 let debugPanel = null;
 let debugFields = null;
+const FOLLOWUP_DELAY_MS = 200;
+const MAX_FOLLOWUP_CHAIN = 6;
 
 function resolveShouldFollowup(data) {
   if (!data) return false;
@@ -29,6 +31,11 @@ function resolveFollowupTimeout(data, fallback) {
   if (!data) return fallback;
   const timeout = Number(data.followup_timeout_ms);
   return Number.isFinite(timeout) && timeout > 0 ? timeout : fallback;
+}
+
+function resolveTranscript(data) {
+  if (!data) return '';
+  return data.transcript || data.text || '';
 }
 
 function setCoreState(nextState) {
@@ -200,7 +207,7 @@ async function requestVoiceTurn({ mode, timeoutMs }) {
 async function handleAssistantResponse(data, { enableFollowup } = {}) {
   const shouldFollowup = resolveShouldFollowup(data);
   console.debug('[ASSIST] handle', {
-    replied: data?.replied,
+    replied: Boolean(data?.reply),
     should_followup: shouldFollowup,
   });
   if (data.reply) {
@@ -221,6 +228,7 @@ async function handleAssistantResponse(data, { enableFollowup } = {}) {
   let shouldContinue = shouldFollowup;
   let timeoutMs = resolveFollowupTimeout(data, 6000);
   let nextMode = 'followup';
+  let chainCount = 0;
 
   console.debug('[FOLLOWUP] start', {
     sessionId,
@@ -230,6 +238,11 @@ async function handleAssistantResponse(data, { enableFollowup } = {}) {
   });
 
   while (shouldContinue && sessionId === followupSessionId) {
+    if (chainCount >= MAX_FOLLOWUP_CHAIN) {
+      console.debug('[FOLLOWUP] max chain reached', { chainCount });
+      break;
+    }
+    chainCount += 1;
     console.debug('[FOLLOWUP] iter', {
       sessionId,
       followupSessionId,
@@ -237,6 +250,7 @@ async function handleAssistantResponse(data, { enableFollowup } = {}) {
       timeoutMs,
     });
     setCoreState('listening');
+    await new Promise((resolve) => setTimeout(resolve, FOLLOWUP_DELAY_MS));
     let result;
     try {
       result = await requestVoiceTurn({ mode: nextMode, timeoutMs });
@@ -254,8 +268,9 @@ async function handleAssistantResponse(data, { enableFollowup } = {}) {
     }
 
     const nextData = result.data;
-    if (nextData?.text) {
-      appendMessage('user', nextData.text);
+    const nextTranscript = resolveTranscript(nextData);
+    if (nextTranscript) {
+      appendMessage('user', nextTranscript);
     }
 
     await handleAssistantResponse(nextData);
@@ -264,9 +279,9 @@ async function handleAssistantResponse(data, { enableFollowup } = {}) {
 
     shouldContinue = resolveShouldFollowup(nextData);
     timeoutMs = resolveFollowupTimeout(nextData, 6000);
-    nextMode = nextData.replied ? 'followup' : 'second_chance';
+    nextMode = nextData?.reply ? 'followup' : 'second_chance';
 
-    if (!nextData.replied && shouldContinue) {
+    if (!nextData?.reply && shouldContinue) {
       attempt += 1;
       if (attempt > 1) {
         break;
@@ -378,8 +393,9 @@ async function handleVoiceInput() {
     }
 
     const data = result.data;
-    if (data.text) {
-      appendMessage('user', data.text);
+    const transcript = resolveTranscript(data);
+    if (transcript) {
+      appendMessage('user', transcript);
     }
 
     await handleAssistantResponse(data, { enableFollowup: true });
