@@ -14,6 +14,23 @@ let coreState = null;
 let debugPanel = null;
 let debugFields = null;
 
+function resolveShouldFollowup(data) {
+  if (!data) return false;
+  if (typeof data.should_followup === 'boolean') {
+    return data.should_followup;
+  }
+  if (typeof data.should_followup === 'string') {
+    return data.should_followup.toLowerCase() === 'true';
+  }
+  return Boolean(data.replied);
+}
+
+function resolveFollowupTimeout(data, fallback) {
+  if (!data) return fallback;
+  const timeout = Number(data.followup_timeout_ms);
+  return Number.isFinite(timeout) && timeout > 0 ? timeout : fallback;
+}
+
 function setCoreState(nextState) {
   coreState = nextState;
   window.coreStateController?.setCoreState(nextState);
@@ -135,52 +152,56 @@ async function requestVoiceTurn({ mode, timeoutMs }) {
   console.debug('[FOLLOWUP] request', { mode, timeoutMs });
   followupAbortController = new AbortController();
   updateDebugPanel();
-  const response = await fetch('/api/voice_ptt', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ mode, timeout_ms: timeoutMs }),
-    signal: followupAbortController.signal,
-  });
-  console.debug('[FOLLOWUP] response status', response.status);
-  followupAbortController = null;
-  updateDebugPanel();
+  try {
+    const response = await fetch('/api/voice_ptt', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode, timeout_ms: timeoutMs }),
+      signal: followupAbortController.signal,
+    });
+    console.debug('[FOLLOWUP] response status', response.status);
 
-  if (!response.ok) {
-    if (response.status === 422) {
-      let message = "Didn't catch that, Sir.";
-      try {
-        const data = await response.json();
-        if (data?.message) {
-          message = data.message;
+    if (!response.ok) {
+      if (response.status === 422) {
+        let message = "Didn't catch that, Sir.";
+        try {
+          const data = await response.json();
+          if (data?.message) {
+            message = data.message;
+          }
+        } catch (error) {
+          console.warn('Failed to parse no-speech response', error);
         }
-      } catch (error) {
-        console.warn('Failed to parse no-speech response', error);
+        return { error: message };
       }
-      return { error: message };
-    }
-    if (response.status === 409) {
-      let message = 'Audio playback is active. Please wait, Sir.';
-      try {
-        const data = await response.json();
-        if (data?.detail) {
-          message = data.detail;
+      if (response.status === 409) {
+        let message = 'Audio playback is active. Please wait, Sir.';
+        try {
+          const data = await response.json();
+          if (data?.detail) {
+            message = data.detail;
+          }
+        } catch (error) {
+          console.warn('Failed to parse voice error response', error);
         }
-      } catch (error) {
-        console.warn('Failed to parse voice error response', error);
+        return { error: message };
       }
-      return { error: message };
+      throw new Error(`Voice request failed with status ${response.status}`);
     }
-    throw new Error(`Voice request failed with status ${response.status}`);
+
+    const data = await response.json();
+    return { data };
+  } finally {
+    followupAbortController = null;
+    updateDebugPanel();
   }
-
-  const data = await response.json();
-  return { data };
 }
 
 async function handleAssistantResponse(data, { enableFollowup } = {}) {
+  const shouldFollowup = resolveShouldFollowup(data);
   console.debug('[ASSIST] handle', {
     replied: data?.replied,
-    should_followup: data?.should_followup,
+    should_followup: shouldFollowup,
   });
   if (data.reply) {
     appendMessage('assistant', data.reply);
@@ -188,7 +209,7 @@ async function handleAssistantResponse(data, { enableFollowup } = {}) {
   maybeTriggerToolImpulse(data.metadata);
   await playAudioUrl(data.audio_url);
 
-  if (!enableFollowup || !data.should_followup) {
+  if (!enableFollowup || !shouldFollowup) {
     if (enableFollowup) {
       setCoreState('idle');
     }
@@ -197,8 +218,8 @@ async function handleAssistantResponse(data, { enableFollowup } = {}) {
 
   const sessionId = followupSessionId;
   let attempt = 0;
-  let shouldContinue = data.should_followup;
-  let timeoutMs = data.followup_timeout_ms;
+  let shouldContinue = shouldFollowup;
+  let timeoutMs = resolveFollowupTimeout(data, 6000);
   let nextMode = 'followup';
 
   console.debug('[FOLLOWUP] start', {
@@ -241,8 +262,8 @@ async function handleAssistantResponse(data, { enableFollowup } = {}) {
 
     if (sessionId !== followupSessionId) return;
 
-    shouldContinue = nextData.should_followup;
-    timeoutMs = nextData.followup_timeout_ms;
+    shouldContinue = resolveShouldFollowup(nextData);
+    timeoutMs = resolveFollowupTimeout(nextData, 6000);
     nextMode = nextData.replied ? 'followup' : 'second_chance';
 
     if (!nextData.replied && shouldContinue) {
